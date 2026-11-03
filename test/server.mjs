@@ -20,8 +20,8 @@ export function startServer() {
       let body = await readFile(file);
       if (url.pathname === '/panel.html' && url.searchParams.has('harness')) {
         body = String(body).replace(
-          '<script src="panel.js"></script>',
-          '<script src="src/ops.js"></script><script src="test/transport.js"></script><script src="panel.js"></script>',
+          '<script type="module" src="build/panel.js"></script>',
+          '<script src="src/ops.js"></script><script src="test/transport.js"></script><script type="module" src="build/panel.js"></script>',
         );
       }
       res.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream' });

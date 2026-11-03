@@ -37,6 +37,8 @@ Storage Buckets exist only in Chromium-based browsers ([caniuse](https://caniuse
 
 ## Try it locally
 
+Run `npm install && npm run build` first. The panel is bundled into `build/`, which is not in git.
+
 Chrome or Edge:
 
 1. Open `chrome://extensions` (Chrome) or `edge://extensions` (Edge).
@@ -76,7 +78,9 @@ WebKit in Playwright has no working OPFS, so its tests are skipped with the reas
 - `src/ops.js`: the file operations. It runs inside the inspected page and keeps no state.
 - `src/agent.js`: answers the panel's requests inside the page.
 - `src/background.js`: adds the agent to the page when needed and passes messages.
-- `panel.html`, `panel.js`, `panel.css`: the panel.
+- `panel.html`, `panel.css`: the panel page.
+- `panel/`: the panel source, split into modules. `main.js` starts it.
+- `scripts/build.mjs`: bundles `panel/` into `build/` with esbuild. `build/` is git-ignored.
 - `devtools.html`, `devtools.js`: registers the panel.
 
 ## License

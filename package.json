@@ -5,11 +5,13 @@
   "description": "Browse and edit a site's origin private file system, including Storage Buckets, from the developer tools.",
   "license": "MIT",
   "scripts": {
-    "test": "node --test --test-timeout=150000 'test/*.test.mjs'",
-    "package": "sh scripts/package.sh",
-    "lint:firefox": "web-ext lint --source-dir . --ignore-files 'test/**' 'scripts/**' 'node_modules/**' 'dist/**' 'package*.json' '*.md'"
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test --test-timeout=150000 'test/*.test.mjs'",
+    "package": "npm run build && sh scripts/package.sh",
+    "lint:firefox": "web-ext lint --source-dir . --ignore-files 'test/**' 'scripts/**' 'node_modules/**' 'dist/**' 'panel/**' 'package*.json' '*.md'"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "playwright": "1.56.0",
     "web-ext": "^8.10.0"
   }
