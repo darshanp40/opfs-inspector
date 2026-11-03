@@ -10,6 +10,7 @@ export const els = {
 export const state = {
   areas: [],
   areaId: 'default',
+  origin: '',
   canWrite: true,
   expanded: new Set(['']),
   children: new Map(),

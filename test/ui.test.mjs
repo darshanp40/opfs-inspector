@@ -554,6 +554,239 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.context().close();
     });
 
+    const opfsFiles = (p) => p.evaluate(async () => {
+      const out = [];
+      const walk = async (dir, prefix) => {
+        for await (const h of dir.values()) {
+          out.push(prefix + h.name + (h.kind === 'directory' ? '/' : ''));
+          if (h.kind === 'directory') await walk(h, `${prefix}${h.name}/`);
+        }
+      };
+      await walk(await navigator.storage.getDirectory(), '');
+      return out.sort();
+    });
+
+    it('duplicate makes "a copy.txt"', async () => {
+      const p = await freshPage(['a.txt', 'b.txt']);
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('a.txt').click();
+      await p.keyboard.press('ControlOrMeta+d');
+      await r('a copy.txt').waitFor();
+      // Several selected: each is duplicated.
+      await r('a.txt').click();
+      await r('b.txt').click({ modifiers: ['ControlOrMeta'] });
+      await p.keyboard.press('ControlOrMeta+d');
+      await r('b copy.txt').waitFor();
+      await r('a copy 2.txt').waitFor();
+      assert.match(await p.locator('#status').textContent(), /Duplicated 2 items/);
+      await p.context().close();
+    });
+
+    it('drag a.txt onto folder y moves it', async () => {
+      const p = await freshPage(['a.txt', 'y/']);
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('a.txt').dragTo(r('y'));
+      await p.waitForFunction(() => /Moved a\.txt/.test(document.getElementById('status').textContent));
+      assert.deepEqual(await opfsFiles(p), ['y/', 'y/a.txt']);
+      await p.context().close();
+    });
+
+    it('dragging a folder onto its own child is refused and nothing moves', async () => {
+      const p = await freshPage(['c/', 'q/'], 'p');
+      await p.emulateMedia({ forcedColors: 'active' });
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('p').click();
+      await p.keyboard.press('ArrowRight');
+      await r('p/c').waitFor();
+      await r('p').hover();
+      await p.mouse.down();
+      await r('').hover();
+      await r('p/c').hover();
+      await r('p/c').hover({ position: { x: 20, y: 5 } });
+      // The refused row is marked, and the mark shows in forced colors.
+      await p.waitForFunction(() => document.querySelector('.row[data-path="p/c"]').classList.contains('drop-refused'));
+      assert.notEqual(await r('p/c').evaluate((el) => getComputedStyle(el).outlineStyle), 'none');
+      await p.mouse.up();
+      assert.deepEqual(await opfsFiles(p), ['p/', 'p/c/', 'p/q/']);
+      assert.doesNotMatch(await p.locator('#status').textContent(), /Moved/);
+      await p.context().close();
+    });
+
+    it('a drop target is highlighted in forced colors', async () => {
+      const p = await freshPage(['a.txt', 'y/']);
+      await p.emulateMedia({ forcedColors: 'active' });
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('a.txt').hover();
+      await p.mouse.down();
+      await r('y').hover();
+      await r('y').hover({ position: { x: 20, y: 5 } });
+      await p.waitForFunction(() => document.querySelector('.row[data-path="y"]').classList.contains('drop-target'));
+      assert.notEqual(await r('y').evaluate((el) => getComputedStyle(el).outlineStyle), 'none');
+      await p.mouse.up();
+      await p.context().close();
+    });
+
+    it('drop two files from the computer', async () => {
+      const p = await freshPage(['clash.txt'], 'y');
+      await p.reload();
+      await p.locator('.row[data-path="y"]').waitFor();
+      await p.evaluate(() => {
+        const dt = new DataTransfer();
+        for (const name of ['one.txt', 'two.txt', 'clash.txt']) dt.items.add(new File([name], name));
+        const row = document.querySelector('.row[data-path="y"]');
+        for (const type of ['dragenter', 'dragover', 'drop']) row.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+      });
+      await p.locator('.row[data-path="y/two.txt"]').waitFor();
+      await p.locator('.row[data-path="y/one.txt"]').waitFor();
+      assert.match(await p.locator('#status').textContent(), /Uploaded 2 files\. Skipped clash\.txt/);
+      await p.context().close();
+    });
+
+    it('dropping a folder from the computer keeps its structure', async () => {
+      const p = await freshPage([]);
+      await p.reload();
+      await p.locator('.row[data-path=""]').click();
+      await p.evaluate(() => {
+        // Stand-ins for the entries a real drop gives. readEntries hands out one batch, then none.
+        const file = (name) => ({ name, isFile: true, file: (ok) => ok(new File([name], name)) });
+        const dir = (name, children) => ({
+          name, isDirectory: true,
+          createReader: () => { let left = children; return { readEntries: (ok) => { ok(left); left = []; } }; },
+        });
+        const tree = dir('top', [file('a.txt'), dir('inner', [file('b.txt')]), dir('empty', [])]);
+        const event = new Event('drop', { bubbles: true, cancelable: true });
+        Object.defineProperty(event, 'dataTransfer', {
+          value: { types: ['Files'], files: [], items: [{ kind: 'file', webkitGetAsEntry: () => tree }] },
+        });
+        document.getElementById('tree').dispatchEvent(event);
+      });
+      await p.waitForFunction(() => /Uploaded 2 files/.test(document.getElementById('status').textContent));
+      assert.deepEqual(await opfsFiles(p), ['top/', 'top/a.txt', 'top/empty/', 'top/inner/', 'top/inner/b.txt']);
+      await p.context().close();
+    });
+
+    it('select 3 and Delete removes all after one confirm', async () => {
+      const p = await freshPage(['f1.txt', 'f2.txt', 'f3.txt', 'f4.txt']);
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('f1.txt').click();
+      await r('f3.txt').click({ modifiers: ['Shift'] });
+      await p.keyboard.press('Delete');
+      await p.locator('#card-body .actions', { hasText: 'Delete 3 items?' }).waitFor();
+      await p.locator('#card-body button.danger', { hasText: 'Delete' }).click();
+      await p.waitForFunction(() => /Deleted 3 items/.test(document.getElementById('status').textContent));
+      assert.deepEqual(await opfsFiles(p), ['f4.txt']);
+      await p.context().close();
+    });
+
+    it('a bulk delete reports the items it could not delete', async () => {
+      const p = await freshPage(['f1.txt', 'f2.txt']);
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('f1.txt').click();
+      await r('f2.txt').click({ modifiers: ['Shift'] });
+      await p.keyboard.press('Delete');
+      await p.locator('#card-body .actions', { hasText: 'Delete 2 items?' }).waitFor();
+      await p.evaluate(async () => (await navigator.storage.getDirectory()).removeEntry('f2.txt'));
+      await p.locator('#card-body button.danger', { hasText: 'Delete' }).click();
+      await p.waitForFunction(() => /Deleted 1 of 2\. f2\.txt:/.test(document.getElementById('status').textContent));
+      await p.context().close();
+    });
+
+    it('Delete acts on the highlighted row, not the one last clicked', async () => {
+      const p = await freshPage(['a.txt', 'b.txt']);
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('a.txt').click();
+      await r('b.txt').click({ modifiers: ['ControlOrMeta'] });
+      await r('b.txt').click({ modifiers: ['ControlOrMeta'] });
+      assert.equal(await p.locator('#tree [aria-selected="true"]').count(), 1);
+      await p.keyboard.press('Delete');
+      await p.locator('#card-body .actions', { hasText: 'Delete a.txt?' }).waitFor();
+      await p.context().close();
+    });
+
+    it('Rename is off with several selected', async () => {
+      const p = await freshPage(['a.txt', 'b.txt']);
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('a.txt').click();
+      await r('b.txt').click({ modifiers: ['ControlOrMeta'] });
+      assert.equal(await p.locator('#rename').isDisabled(), true);
+      await p.context().close();
+    });
+
+    it('download of a selection is a zip containing the paths', async () => {
+      const p = await freshPage(['a.txt', 'd/', 'b.txt']);
+      const requests = [];
+      p.on('request', (req) => requests.push(req.url()));
+      await p.evaluate(async () => {
+        const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('d');
+        const w = await (await dir.getFileHandle('in.txt', { create: true })).createWritable();
+        await w.write('inside');
+        await w.close();
+      });
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('d').click();
+      await r('a.txt').click({ modifiers: ['ControlOrMeta'] });
+      assert.deepEqual(requests.filter((u) => /zip/.test(u)), [], 'zip code loads only for a zip');
+      const [download] = await Promise.all([p.waitForEvent('download'), p.click('#download')]);
+      assert.equal(download.suggestedFilename(), `${new URL(origin).hostname}.zip`);
+      const { unzipSync } = await import('fflate');
+      const { readFile } = await import('node:fs/promises');
+      const files = unzipSync(new Uint8Array(await readFile(await download.path())));
+      assert.deepEqual(Object.keys(files).sort(), ['a.txt', 'd/', 'd/in.txt']);
+      assert.equal(new TextDecoder().decode(files['d/in.txt']), 'inside');
+      assert.ok(requests.some((u) => /zip/.test(u)));
+      await p.context().close();
+    });
+
+    it('zip bundle is not loaded until a zip is made', async () => {
+      const p = await freshPage(['x.txt'], 'd');
+      const requests = [];
+      p.on('request', (req) => requests.push(req.url()));
+      await p.reload();
+      await p.locator('.row[data-path="d"]').click();
+      await p.keyboard.press('ArrowRight');
+      await p.locator('.row[data-path="d/x.txt"]').click();
+      // One file downloads as it is, with no zip.
+      const [one] = await Promise.all([p.waitForEvent('download'), p.click('#download')]);
+      assert.equal(one.suggestedFilename(), 'x.txt');
+      assert.deepEqual(requests.filter((u) => /zip/.test(u)), []);
+      await p.locator('.row[data-path="d"]').click();
+      const [folder] = await Promise.all([p.waitForEvent('download'), p.click('#download')]);
+      assert.equal(folder.suggestedFilename(), 'd.zip');
+      assert.ok(requests.some((u) => /zip/.test(u)));
+      await p.context().close();
+    });
+
+    it('a download over 5 MB shows its progress', async () => {
+      const p = await freshPage([]);
+      await p.evaluate(async () => {
+        const w = await (await (await navigator.storage.getDirectory()).getFileHandle('big.bin', { create: true })).createWritable();
+        await w.write(new Uint8Array(6 * 1024 * 1024));
+        await w.close();
+      });
+      await p.click('#refresh');
+      await p.locator('.row[data-path="big.bin"]').waitFor();
+      await p.evaluate(() => {
+        window.seen = [];
+        new MutationObserver(() => window.seen.push(document.getElementById('status').textContent))
+          .observe(document.getElementById('status'), { childList: true, characterData: true, subtree: true });
+      });
+      await p.locator('.row[data-path="big.bin"]').click();
+      const [download] = await Promise.all([p.waitForEvent('download'), p.click('#download')]);
+      assert.equal(download.suggestedFilename(), 'big.bin');
+      const seen = await p.evaluate(() => window.seen);
+      assert.ok(seen.includes('Reading big.bin: 512 KB of 6.0 MB'), seen.join(' | '));
+      await p.context().close();
+    });
+
     it('axe finds no serious violations', async () => {
       await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();

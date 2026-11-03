@@ -23,7 +23,8 @@ function meta(pairs) {
   return dl;
 }
 
-export async function readAll(path, size) {
+// onChunk(n) is told the size of each part read.
+export async function readAll(path, size, onChunk) {
   const bytes = new Uint8Array(size);
   let offset = 0;
   while (offset < size) {
@@ -32,6 +33,7 @@ export async function readAll(path, size) {
     if (chunk.length === 0) break;
     bytes.set(chunk.subarray(0, size - offset), offset);
     offset += chunk.length;
+    if (onChunk) onChunk(chunk.length);
   }
   return bytes;
 }
@@ -168,7 +170,9 @@ export async function showDetail() {
 }
 
 function drawCard(item) {
-  els.cardBody.replaceChildren();
+  // An open question from an action stays, or its answer would never come.
+  // Removed one by one, so the question keeps focus.
+  for (const node of [...els.cardBody.childNodes]) if (!node.classList || !node.classList.contains('prompt')) node.remove();
   if (!item) {
     els.cardHead.replaceChildren();
     els.cardTabs.replaceChildren();

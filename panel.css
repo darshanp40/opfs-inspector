@@ -199,3 +199,11 @@ dialog form { align-self: flex-end; margin: 0; }
   .menu { border-color: CanvasText; }
   .menu [role=menuitem]:focus { outline: 2px solid Highlight; outline-offset: -2px; }
 }
+
+/* Drag and drop: where a drop goes, and where it cannot. */
+.row.drop-target, .tree.drop-target { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); color: var(--fg); }
+.row.drop-refused { outline: 2px dashed var(--error); outline-offset: -2px; }
+@media (forced-colors: active) {
+  .row.drop-target, .tree.drop-target { outline: 2px solid Highlight; }
+  .row.drop-refused { outline: 2px dashed GrayText; }
+}

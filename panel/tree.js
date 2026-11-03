@@ -6,11 +6,13 @@ import { showDetail } from './detail.js';
 import { iconFor } from './icons.js';
 import { commandsFor, syncToolbar } from './commands.js';
 import { openMenu } from './menu.js';
+import { moveTo, upload, targets } from './actions.js';
 
 async function loadAreas() {
   const info = await call('areas');
   state.areas = info.areas;
   state.canWrite = info.canWrite;
+  state.origin = info.origin;
   if (!state.areas.some((a) => a.id === state.areaId)) state.areaId = 'default';
   els.area.replaceChildren(...state.areas.map((a) => new Option(a.label, a.id, false, a.id === state.areaId)));
   els.origin.textContent = info.origin + (info.hasBuckets ? '' : ' (no storage buckets in this browser)');
@@ -207,6 +209,7 @@ function row(entry) {
   div.className = 'row';
   div.setAttribute('role', 'treeitem');
   div.dataset.path = entry.path;
+  div.draggable = entry.path !== '';
   div.style.paddingLeft = `${8 + entry.depth * 16}px`;
   const selected = state.selection.has(entry.path);
   div.classList.toggle('selected', selected);
@@ -315,6 +318,71 @@ els.tree.addEventListener('keydown', (event) => {
   else moveFocus(to.path);
 });
 
+// Drag and drop. Rows dragged onto a folder move there. Files from the
+// computer go into the folder they are dropped on, or the selected folder.
+let dragged = null; // items being dragged from the tree
+let marked = null;
+
+function mark(el, name) {
+  if (marked && (marked !== el || !marked.classList.contains(name))) marked.classList.remove('drop-target', 'drop-refused');
+  marked = el;
+  if (el) el.classList.add(name);
+}
+
+// { folder, ok, el }: where a drop would go, and the element to mark.
+function dropAt(event) {
+  const item = itemAt(event.target);
+  const el = item ? event.target.closest('.row') : els.tree;
+  if (dragged) {
+    if (!item || item.kind !== 'directory') return { ok: false, el: null };
+    // Not onto itself, its own folder, or anything inside it.
+    const ok = !dragged.some((d) => d.path === item.path || parentOf(d.path) === item.path || inside(d.path, item.path));
+    return { folder: item.path, ok, el };
+  }
+  if (!event.dataTransfer || ![...event.dataTransfer.types].includes('Files')) return { ok: false, el: null };
+  if (item && item.kind === 'directory') return { folder: item.path, ok: true, el };
+  return { folder: undefined, ok: true, el: els.tree };
+}
+
+els.tree.addEventListener('dragstart', (event) => {
+  const item = itemAt(event.target);
+  if (!item || item.path === '') return;
+  dragged = state.selection.has(item.path) ? targets() : [item];
+  event.dataTransfer.effectAllowed = 'move';
+  // Firefox starts a drag only when it has data.
+  event.dataTransfer.setData('text/plain', dragged.map((d) => `/${d.path}`).join('\n'));
+});
+els.tree.addEventListener('dragend', () => {
+  dragged = null;
+  mark(null);
+});
+for (const type of ['dragenter', 'dragover']) {
+  els.tree.addEventListener(type, (event) => {
+    const { ok, el } = dropAt(event);
+    mark(el, ok ? 'drop-target' : 'drop-refused');
+    // Not cancelling the event shows the "not allowed" cursor.
+    if (!ok) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = dragged ? 'move' : 'copy';
+  });
+}
+els.tree.addEventListener('dragleave', (event) => {
+  if (!els.tree.contains(event.relatedTarget)) mark(null);
+});
+els.tree.addEventListener('drop', (event) => {
+  event.preventDefault();
+  const { folder, ok } = dropAt(event);
+  const list = dragged;
+  dragged = null;
+  mark(null);
+  if (!ok) return;
+  if (list) return moveTo(list, folder);
+  // Entries must be taken now: the drop's data is gone once it returns.
+  const files = [...event.dataTransfer.items].filter((i) => i.kind === 'file')
+    .map((i) => (i.webkitGetAsEntry && i.webkitGetAsEntry()) || i.getAsFile());
+  upload(files, folder);
+});
+
 // The item that has the tree's focus.
 export const focusedItem = () => items().find((r) => r.path === state.focus);
 
@@ -420,6 +488,15 @@ function selectRange(item) {
 export function selectAll() {
   if (blocked(null)) return;
   setSelection(items().map((r) => r.path), null);
+}
+
+// Selected rows in tree order, leaving out rows inside a selected folder.
+export function selectedItems() {
+  const under = (path) => {
+    for (let p = parentOf(path); p; p = parentOf(p)) if (state.selection.has(p)) return true;
+    return false;
+  };
+  return items().filter((r) => state.selection.has(r.path) && !under(r.path));
 }
 
 export const updateButtons = syncToolbar;

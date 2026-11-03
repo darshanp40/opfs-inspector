@@ -3,7 +3,7 @@ import { onNavigated } from './transport.js';
 import { applyTheme } from './theme.js';
 import { els, state, setStatus, selectOnly } from './state.js';
 import { refresh, updateButtons, focusedItem, selectAll, select, toggle } from './tree.js';
-import { create, rename, remove, download, upload, duplicate } from './actions.js';
+import { create, rename, remove, download, upload, duplicate, targets } from './actions.js';
 import { register, bindToolbar } from './commands.js';
 import { openHelp } from './menu.js';
 import { parentOf } from './format.js';
@@ -27,7 +27,11 @@ els.uploadInput.addEventListener('change', async () => {
   if (files.length) await upload(files);
 });
 
-const hasItem = () => !!state.selected && state.selected.path !== '';
+// The root is only ever the sole target, so checking the first is enough.
+const hasItem = () => {
+  const list = targets();
+  return list.length > 0 && list[0].path !== '';
+};
 const closedFolder = () => {
   const f = focusedItem();
   return !!f && f.kind === 'directory' && !state.expanded.has(f.path);
@@ -63,17 +67,17 @@ register({
   id: 'upload', label: 'Upload', tip: 'Upload files into the selected folder', keys: 'Mod+U', toolbar: true, menu: true, typing: true,
   when: () => state.canWrite, run: () => els.uploadInput.click(),
 });
-register({ id: 'rename', label: 'Rename', tip: 'Rename the selected item', keys: 'F2', toolbar: true, menu: true, when: hasItem, run: rename });
+register({ id: 'rename', label: 'Rename', tip: 'Rename the selected item', keys: 'F2', toolbar: true, menu: true, when: () => hasItem() && targets().length === 1, run: rename });
 register({
-  id: 'duplicate', label: 'Duplicate', tip: 'Copy the selected item into the same folder', keys: 'Mod+D', menu: true,
+  id: 'duplicate', label: 'Duplicate', tip: 'Copy the selected items into the same folder', keys: 'Mod+D', menu: true,
   when: () => hasItem() && state.canWrite, run: duplicate,
 });
 register({
-  id: 'download', label: 'Download', tip: 'Download the selected file', keys: 'Mod+S', scope: '!editor', swallow: true, toolbar: true, menu: true,
-  when: () => !!state.selected && state.selected.kind === 'file', run: download,
+  id: 'download', label: 'Download', tip: 'Download the selected file, or a zip of anything else', keys: 'Mod+S', scope: '!editor', swallow: true, toolbar: true, menu: true,
+  when: () => targets().length > 0, run: download,
 });
 register({
-  id: 'delete', label: 'Delete', tip: 'Delete the selected item', keys: ['Delete', 'Mod+Backspace'], scope: 'tree', toolbar: true, menu: true,
+  id: 'delete', label: 'Delete', tip: 'Delete the selected items', keys: ['Delete', 'Mod+Backspace'], scope: 'tree', toolbar: true, menu: true,
   when: hasItem, run: remove,
 });
 register({
