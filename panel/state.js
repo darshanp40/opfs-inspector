@@ -22,6 +22,8 @@ export const state = {
   chunk: 512 * 1024,
   detailRun: 0,
   sizeRun: 0,
+  sizing: false, // a folder size calculation is running
+  storageRun: 0,
   tab: null, // { path, name } of the open card tab
   usageRun: 0,
 };

@@ -963,6 +963,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.getByLabel('Folder size').selectOption('recursive');
       await p.getByLabel('Editor font size').fill('16');
       await p.getByLabel('Editor font size').dispatchEvent('change');
+      assert.match(await p.locator('#settings-status').textContent(), /Editor font size saved/);
       await p.keyboard.press('Escape');
       await p.locator('#settings-dialog[open]').waitFor({ state: 'detached' }).catch(() => {});
       assert.equal(await p.evaluate(() => document.activeElement.id), 'settings');
@@ -988,6 +989,53 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.locator('#storage-dialog tbody tr', { hasText: 'app-db' }).waitFor();
       assert.ok(await p.locator('#storage-dialog tbody tr').count() >= 2);
       assert.match(await p.locator('#storage-dialog tbody tr').first().textContent(), /of/);
+      await p.context().close();
+    });
+
+    it('a setting that is not folder size leaves a running calculation alone', async () => {
+      const p = await freshPage(['d/']);
+      await p.evaluate(() => {
+        const t = window.opfsTransport;
+        const real = t.call;
+        t.call = async (op, args) => {
+          const reply = await real(op, args);
+          if (op === 'dirSize') await new Promise((r) => setTimeout(r, 600));
+          return reply;
+        };
+      });
+      await p.click('#refresh');
+      await p.locator('.row[data-path="d"]').click();
+      await p.getByRole('button', { name: 'Calculate size', exact: true }).click();
+      await p.click('#settings');
+      await p.getByLabel('Sort keys').check();
+      await p.keyboard.press('Escape');
+      await p.locator('#card-body .size-result').waitFor();
+      // Leaving the folder drops the calculation and its message.
+      await p.getByRole('button', { name: 'Calculate size', exact: true }).click();
+      await p.locator('.row[data-path=""]').click();
+      assert.doesNotMatch(await p.locator('#status').textContent(), /Calculating/);
+      await p.context().close();
+    });
+
+    it('a late storage answer does not draw over a newer one', async () => {
+      const p = await freshPage([]);
+      await p.evaluate(() => {
+        const t = window.opfsTransport;
+        const real = t.call;
+        let first = true;
+        t.call = async (op, args) => {
+          if (op !== 'estimate' || !first) return real(op, args);
+          first = false;
+          await new Promise((r) => setTimeout(r, 800));
+          return { ok: true, value: { usage: 111, quota: 1e9 } };
+        };
+      });
+      await p.click('#storage-details');
+      await p.keyboard.press('Escape');
+      await p.click('#storage-details');
+      await p.locator('#storage-status', { hasText: 'loaded' }).waitFor();
+      await p.waitForTimeout(1000);
+      assert.doesNotMatch(await p.locator('#storage-dialog tbody').textContent(), /111 B/);
       await p.context().close();
     });
 

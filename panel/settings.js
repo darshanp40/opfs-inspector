@@ -1,5 +1,4 @@
 // Settings kept in the panel's own localStorage, and the dialog that edits them.
-import { setStatus } from './state.js';
 
 const KEY = 'opfs-inspector:settings';
 const DEFAULTS = { jsonIndent: 2, sortKeys: false, folderSize: 'own', editorFontSize: 12 };
@@ -27,7 +26,8 @@ export function getSettings() {
 }
 
 export function setSettings(partial) {
-  const next = { ...getSettings() };
+  const before = getSettings();
+  const next = { ...before };
   for (const name of Object.keys(DEFAULTS)) if (name in partial && VALID[name](partial[name])) next[name] = partial[name];
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
@@ -35,7 +35,7 @@ export function setSettings(partial) {
     // Not saved, but this session still uses them.
     memory = next;
   }
-  for (const listener of listeners) listener(next);
+  for (const listener of listeners) listener(next, before);
 }
 
 // Calls listener(settings) after each change. Returns a function that stops it.
@@ -52,6 +52,7 @@ export function openSettings() {
   field('set-sort').checked = s.sortKeys;
   field('set-folder').value = s.folderSize;
   field('set-font').value = s.editorFontSize;
+  field('settings-status').textContent = '';
   dialog.showModal();
 }
 
@@ -59,7 +60,8 @@ export function bindSettings() {
   const field = (id) => document.getElementById(id);
   const save = (partial, message) => {
     setSettings(partial);
-    setStatus(message, 'ok');
+    // The dialog makes the rest of the page inert, so say it inside the dialog.
+    field('settings-status').textContent = message;
   };
   field('set-indent').addEventListener('change', (e) => save({ jsonIndent: e.target.value === '\t' ? '\t' : Number(e.target.value) }, 'JSON indent saved.'));
   field('set-sort').addEventListener('change', (e) => save({ sortKeys: e.target.checked }, 'Sort keys saved.'));

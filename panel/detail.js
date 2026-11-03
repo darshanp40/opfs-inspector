@@ -155,11 +155,13 @@ function sizeTools(path) {
     main.focus();
   });
   const finish = () => {
+    state.sizing = false;
     cancel.hidden = true;
     main.disabled = other.disabled = false;
   };
   async function run(deep) {
     const token = ++state.sizeRun;
+    state.sizing = true;
     result.replaceChildren();
     cancel.hidden = false;
     main.disabled = other.disabled = true;
@@ -235,6 +237,11 @@ export async function showDetail() {
 
 function drawCard(item) {
   state.sizeRun++;
+  // A calculation dropped by a redraw leaves no stale message.
+  if (state.sizing) {
+    state.sizing = false;
+    setStatus('');
+  }
   // An open question from an action stays, or its answer would never come.
   // Removed one by one, so the question keeps focus.
   for (const node of [...els.cardBody.childNodes]) if (!node.classList || !node.classList.contains('prompt')) node.remove();
@@ -382,6 +389,6 @@ function editor(path, text) {
 }
 
 // A changed setting shows on the open folder.
-onSettingsChange(() => {
-  if (state.selected && state.selected.kind === 'directory') showDetail();
+onSettingsChange((now, before) => {
+  if (now.folderSize !== before.folderSize && state.selected && state.selected.kind === 'directory') showDetail();
 });

@@ -353,8 +353,13 @@ export async function openStorage() {
     for (const text of [name, used, quota]) tr.append(Object.assign(document.createElement('td'), { textContent: text }));
     return tr;
   };
+  const live = document.getElementById('storage-status');
+  const run = ++state.storageRun;
+  // Closing the dialog ends the run, so a late answer draws nothing.
+  dialog.addEventListener('close', () => state.storageRun++, { once: true });
   body.replaceChildren(row('Loading…', '', ''));
-  dialog.showModal();
+  live.textContent = 'Loading storage details…';
+  if (!dialog.open) dialog.showModal();
   const rows = await Promise.all(state.areas.map(async (a) => {
     try {
       const { usage, quota } = await call('estimate', { area: a.area });
@@ -364,6 +369,7 @@ export async function openStorage() {
       return row(a.label, 'Not available', 'Not available');
     }
   }));
+  if (run !== state.storageRun) return;
   body.replaceChildren(...rows);
-  setStatus(`Storage details: ${rows.length} storage${rows.length === 1 ? '' : 's'}.`);
+  live.textContent = `Storage details loaded: ${rows.length} storage${rows.length === 1 ? '' : 's'}.`;
 }
