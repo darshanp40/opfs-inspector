@@ -55,7 +55,7 @@ Safari extensions ship inside a macOS app. This could not be built here, because
 1. Install Xcode from the App Store.
 2. Run `xcrun safari-web-extension-converter /path/to/opfs-inspector --app-name "OPFS Inspector"`. It creates an Xcode project around the extension.
 3. Build and run the app in Xcode, then in Safari turn on **Settings › Advanced › Show features for web developers**, and allow the extension in **Settings › Extensions** (for an unsigned build, also **Develop › Allow Unsigned Extensions**).
-4. Open the Web Inspector and choose the **OPFS** tab.
+4. Open the Web Inspector and choose the **OPFS Inspector** tab.
 5. To publish, join the Apple Developer Program, archive the app in Xcode and submit it through App Store Connect.
 
 Editing needs Safari 26 or later; earlier versions can browse only.

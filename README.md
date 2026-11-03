@@ -42,14 +42,14 @@ Chrome or Edge:
 1. Open `chrome://extensions` (Chrome) or `edge://extensions` (Edge).
 2. Turn on **Developer mode**.
 3. Click **Load unpacked** and choose this folder.
-4. Open any site that uses OPFS, open the developer tools (F12), and choose the **OPFS** tab. If you don't see it, look under the `»` menu.
+4. Open any site that uses OPFS, open the developer tools (F12), and choose the **OPFS Inspector** tab. If you don't see it, look under the `»` menu.
 
 Firefox:
 
 1. Open `about:debugging#/runtime/this-firefox`.
 2. Click **Load Temporary Add-on…** and choose `manifest.json` in this folder.
 3. Open `about:addons`, open OPFS Inspector, and under **Permissions** allow access to all websites. Firefox asks for host access separately.
-4. Open the developer tools and choose the **OPFS** tab.
+4. Open the developer tools and choose the **OPFS Inspector** tab.
 
 Safari needs the extension wrapped in a macOS app, which needs Xcode. See [PUBLISHING.md](PUBLISHING.md).
 
