@@ -54,7 +54,7 @@ const stepTab = (step) => {
 const hasTabs = () => els.cardTabs.children.length > 1;
 
 register({
-  id: 'refresh', label: 'Refresh', tip: 'Reload the file listing', keys: 'Alt+R', toolbar: true, typing: true,
+  id: 'refresh', label: 'Refresh', tip: 'Reload the file listing', keys: 'Alt+R', toolbar: true,
   run: () => (state.dirty ? saveFirst() : refresh()),
 });
 register({

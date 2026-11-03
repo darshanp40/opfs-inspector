@@ -645,21 +645,45 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.context().close();
     });
 
-    // On macOS Option+Shift+N types a character, so it must reach text fields.
-    it('Alt+Shift+N does not make a folder while typing', async () => {
+    // On macOS Option+Shift+N and Option+R type a character, so they must
+    // reach text fields.
+    it('Alt+Shift+N and Alt+R do nothing while typing', async () => {
       const p = await freshPage(['a.txt']);
       await p.reload();
+      // Counts calls to the page, so a refresh shows.
+      await p.evaluate(() => {
+        const t = window.opfsTransport;
+        const call = t.call;
+        window.calls = 0;
+        t.call = (op, args) => {
+          window.calls++;
+          return call(op, args);
+        };
+      });
+      const quiet = async (key) => {
+        const before = await p.evaluate(() => window.calls);
+        await p.keyboard.press(key);
+        await p.waitForTimeout(100);
+        assert.equal(await p.evaluate(() => window.calls), before, key);
+      };
       await p.locator('.row[data-path="a.txt"]').click();
       await p.keyboard.press('F2');
-      await p.locator('#card-body form input').press('Alt+Shift+N');
+      await p.locator('#card-body form input').focus();
+      await quiet('Alt+Shift+N');
+      await quiet('Alt+r');
       assert.match(await p.locator('#card-body form label').textContent(), /^New name\b/);
       await p.locator('#card-body form button', { hasText: 'Cancel' }).click();
       await p.locator('.cm-content').click();
-      await p.keyboard.press('Alt+Shift+N');
+      await quiet('Alt+Shift+N');
+      await quiet('Alt+r');
       assert.equal(await p.locator('#card-body form').count(), 0);
       // Firefox types a character there, Chromium does not.
       await p.evaluate(() => document.querySelector('[data-cmd=discard]:not(:disabled)')?.click());
-      // From the tree it still works.
+      // From the tree both still work.
+      await p.locator('.row[data-path="a.txt"]').click();
+      await p.evaluate(async () => (await navigator.storage.getDirectory()).getFileHandle('later.txt', { create: true }));
+      await p.keyboard.press('Alt+r');
+      await p.locator('.row[data-path="later.txt"]').waitFor();
       await p.locator('.row[data-path="a.txt"]').click();
       await p.keyboard.press('Alt+Shift+N');
       await p.locator('#card-body form label', { hasText: 'New folder name' }).waitFor();
