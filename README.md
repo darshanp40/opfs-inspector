@@ -2,6 +2,10 @@
 
 A developer tools panel for the [origin private file system](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) (OPFS) of the page you are inspecting. It shows the default storage and every [Storage Bucket](https://wicg.github.io/storage-buckets/) of the site, and lets you create, rename, edit, delete, upload and download files.
 
+![Editing a JSON file in the default storage](docs/editor.png)
+
+![A SQLite database inside a Storage Bucket](docs/bucket.png)
+
 ## What it does
 
 - **Storage picker.** Default storage, plus each bucket from `navigator.storageBuckets.keys()` where the browser has Storage Buckets (Chromium-based browsers). A bucket is only opened if it exists, so the panel never creates one.
@@ -58,6 +62,8 @@ npm test
 - `test/extension.test.mjs`: the unpacked extension loaded into Chromium and Microsoft Edge, working on a real page's files and bucket. Needs Edge installed; set `ENGINES=chromium` to skip it.
 
 WebKit in Playwright has no working OPFS, so its tests are skipped with the reason. Safari itself has to be checked by hand.
+
+`node scripts/screenshots.mjs` remakes the screenshots above.
 
 `npm run lint:firefox` checks the manifest for Firefox. `npm run package` builds the zip for the stores.
 
