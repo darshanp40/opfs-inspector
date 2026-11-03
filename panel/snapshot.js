@@ -4,8 +4,12 @@
 // Writes through a sync access handle keep size and lastModified in Chromium,
 // and with locking_mode=exclusive SQLite's change counter stays the same. So
 // the files are read twice in a row, and the copy is kept only when both
-// reads are the same, byte for byte. A hot -journal before or after means a
-// commit is still writing pages, so the copy is taken again then too.
+// reads are the same, byte for byte. It is also taken again when:
+// - a -journal is hot before, between or after the reads, as a commit is
+//   still writing pages (it may spill pages before it commits), or
+// - the database header (with its change counter) differs before and after.
+// ponytail: journal_mode=memory or off with exclusive locking leaves neither
+// sign, so a commit timed exactly around both reads is not seen.
 import { call } from './transport.js';
 import { fromBase64 } from './format.js';
 import { applyWal } from './wal.js';
@@ -28,14 +32,17 @@ async function statOrNull(area, path) {
   }
 }
 
-// A -journal that starts with the magic means a commit is writing pages.
-async function hotJournal(area, path) {
+// The first bytes of a file as base64, or null when it is missing.
+async function head(area, path, length) {
   try {
-    return (await call('read', { area, path: `${path}-journal`, offset: 0, length: 8 })).data === JOURNAL_MAGIC;
+    return (await call('read', { area, path, offset: 0, length })).data;
   } catch {
-    return false;
+    return null;
   }
 }
+
+// A -journal that starts with the magic means a commit is writing pages.
+const hotJournal = async (area, path) => (await head(area, `${path}-journal`, 8)) === JOURNAL_MAGIC;
 
 // Reads a whole file. With earlier, each part must match it instead.
 // Every part must come from the file the stat saw.
@@ -74,15 +81,19 @@ export async function takeSnapshot(area, path, { onProgress = () => {} } = {}) {
     const onChunk = (n) => onProgress((done += n), size * 2);
     try {
       const takenAt = Date.now();
+      // The header is read before the first -journal check and after the last.
+      const dbHead = await head(area, path, 100);
       if (await hotJournal(area, path)) throw new Changed();
       const db = await readFile(area, path, info, onChunk);
       const wal = walInfo ? await readFile(area, walPath, walInfo, onChunk) : null;
+      if (await hotJournal(area, path)) throw new Changed();
       // The second read. A -wal file that appears or goes is a change.
       await readFile(area, path, await statOrNull(area, path), onChunk, db);
       const walNow = await statOrNull(area, walPath);
       if (!wal !== !walNow) throw new Changed();
       if (wal) await readFile(area, walPath, walNow, onChunk, wal);
       if (await hotJournal(area, path)) throw new Changed();
+      if (await head(area, path, 100) !== dbHead) throw new Changed();
       return { db: applyWal(db, wal), takenAt, walApplied: !!wal && wal.length > 0 };
     } catch (error) {
       if (!(error instanceof Changed)) throw error;
