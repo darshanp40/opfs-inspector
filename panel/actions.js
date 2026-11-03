@@ -2,7 +2,7 @@
 import { call } from './transport.js';
 import { els, state, currentArea, setStatus, fail } from './state.js';
 import { join, parentOf, baseName, formatSize, toBase64 } from './format.js';
-import { loadFolder, reloadExpanded, renderTree, updateButtons } from './tree.js';
+import { loadFolder, reloadExpanded, renderTree, updateButtons, showUsage } from './tree.js';
 import { showDetail, readAll } from './detail.js';
 
 function targetFolder() {
@@ -11,7 +11,7 @@ function targetFolder() {
   return sel.kind === 'directory' ? sel.path : parentOf(sel.path);
 }
 
-// Asks for a name inside the detail pane. Resolves to null on cancel.
+// Asks for a name at the top of the card. Resolves to null on cancel.
 function askName(label, initial = '') {
   return new Promise((resolve) => {
     const form = document.createElement('form');
@@ -38,7 +38,7 @@ function askName(label, initial = '') {
       done(input.value.trim() || null);
     });
     cancel.addEventListener('click', () => done(null));
-    els.detail.prepend(form);
+    els.cardBody.prepend(form);
     input.focus();
     input.select();
   });
@@ -62,7 +62,7 @@ function askConfirm(message, action) {
     };
     yes.addEventListener('click', () => done(true));
     no.addEventListener('click', () => done(false));
-    els.detail.prepend(box);
+    els.cardBody.prepend(box);
     yes.focus();
   });
 }
@@ -75,6 +75,7 @@ async function afterChange(message, selectPath, kind) {
   }
   renderTree();
   updateButtons();
+  showUsage();
   await showDetail();
   setStatus(message, 'ok');
 }

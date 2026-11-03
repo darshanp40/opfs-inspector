@@ -3,6 +3,7 @@ import { call } from './transport.js';
 import { els, state, currentArea, setStatus, fail } from './state.js';
 import { join, parentOf, baseName, formatSize } from './format.js';
 import { showDetail } from './detail.js';
+import { iconFor } from './icons.js';
 
 async function loadAreas() {
   const info = await call('areas');
@@ -32,6 +33,7 @@ export async function reloadExpanded() {
 export async function refresh() {
   try {
     await loadAreas();
+    showUsage();
     await reloadExpanded();
     if (state.selected && !findEntry(state.selected.path)) state.selected = null;
     renderTree();
@@ -51,6 +53,56 @@ function findEntry(path) {
   return list && list.find((e) => e.name === baseName(path));
 }
 
+// Footer text and meter. Only the newest call draws.
+export async function showUsage() {
+  const run = ++state.usageRun;
+  let text = 'Storage use is not available';
+  let value = 0;
+  try {
+    const { usage, quota } = await call('estimate', { area: currentArea() });
+    if (usage != null && quota) {
+      text = `${formatSize(usage)} of ${formatSize(quota)} used`;
+      value = usage / quota;
+    }
+  } catch {
+    // Keep the "not available" text.
+  }
+  if (run !== state.usageRun) return;
+  els.usage.textContent = text;
+  els.usageMeter.value = value;
+  els.usageMeter.title = `${(value * 100).toFixed(value < 0.01 ? 2 : 0)}% used`;
+}
+
+const areaName = () => {
+  const area = state.areas.find((a) => a.id === state.areaId);
+  return area && area.area && area.area.kind === 'bucket' ? area.area.name : 'Default';
+};
+
+// The path bar: one button per part of the selected path.
+function renderCrumbs() {
+  const path = state.selected ? state.selected.path : '';
+  const parts = path ? path.split('/') : [];
+  const items = [];
+  for (let i = 0; i <= parts.length; i++) {
+    const partPath = parts.slice(0, i).join('/');
+    const last = i === parts.length;
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'crumb-sep';
+      sep.setAttribute('aria-hidden', 'true');
+      sep.textContent = '/';
+      items.push(sep);
+    }
+    const button = document.createElement('button');
+    button.className = 'crumb';
+    button.textContent = i === 0 ? areaName() : parts[i - 1];
+    if (last) button.setAttribute('aria-current', 'location');
+    const kind = last && state.selected ? state.selected.kind : 'directory';
+    button.addEventListener('click', () => select(partPath, kind));
+    items.push(button);
+  }
+  els.crumbs.replaceChildren(...items);
+}
 
 export function renderTree() {
   const rows = [];
@@ -58,6 +110,7 @@ export function renderTree() {
   rows.push(rootRow);
   if (state.expanded.has('')) addChildren('', 1, rows);
   els.tree.replaceChildren(...rows);
+  renderCrumbs();
 }
 
 function addChildren(path, depth, rows) {
@@ -66,7 +119,7 @@ function addChildren(path, depth, rows) {
   if (list.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.style.paddingLeft = `${8 + depth * 14 + 18}px`;
+    empty.style.paddingLeft = `${8 + depth * 16 + 20}px`;
     empty.textContent = 'empty';
     rows.push(empty);
   }
@@ -83,16 +136,19 @@ function row(entry) {
   div.tabIndex = 0;
   div.setAttribute('role', 'treeitem');
   div.dataset.path = entry.path;
-  div.style.paddingLeft = `${8 + entry.depth * 14}px`;
-  if (state.selected && state.selected.path === entry.path) div.classList.add('selected');
+  div.style.paddingLeft = `${8 + entry.depth * 16}px`;
+  const selected = Boolean(state.selected && state.selected.path === entry.path);
+  div.classList.toggle('selected', selected);
+  div.setAttribute('aria-selected', String(selected));
   if (entry.error) {
     div.classList.add('error');
     div.title = entry.error;
   }
   const twisty = document.createElement('span');
   twisty.className = 'twisty';
+  twisty.setAttribute('aria-hidden', 'true');
   if (entry.kind === 'directory') {
-    twisty.textContent = state.expanded.has(entry.path) ? '▾' : '▸';
+    if (state.expanded.has(entry.path)) twisty.classList.add('open');
     div.setAttribute('aria-expanded', String(state.expanded.has(entry.path)));
     twisty.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -101,11 +157,11 @@ function row(entry) {
   }
   const name = document.createElement('span');
   name.className = 'name';
-  name.textContent = entry.kind === 'directory' && entry.path ? `${entry.name}/` : entry.name;
+  name.textContent = entry.name;
   const size = document.createElement('span');
   size.className = 'size';
   size.textContent = entry.kind === 'file' ? formatSize(entry.size) : '';
-  div.append(twisty, name, size);
+  div.append(twisty, iconFor(entry), name, size);
   div.addEventListener('click', () => select(entry.path, entry.kind));
   div.addEventListener('dblclick', () => entry.kind === 'directory' && toggle(entry.path));
   div.addEventListener('keydown', (event) => {

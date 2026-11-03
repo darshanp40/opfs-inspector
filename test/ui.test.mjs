@@ -1,6 +1,7 @@
 // The panel, driven like a person would, against ops.js in the same page.
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import AxeBuilder from '@axe-core/playwright';
 import { startServer } from './server.mjs';
 import { engines } from './browsers.mjs';
 
@@ -22,7 +23,8 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
 
     before(async () => {
       browser = await engine.type.launch();
-      page = await browser.newPage();
+      // axe needs a page from a context it can open more pages in.
+      page = await (await browser.newContext()).newPage();
       await page.goto(`${origin}/panel.html?harness`);
       await page.locator('.row[data-path=""]').waitFor();
     });
@@ -30,10 +32,15 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
 
     async function answer(button, value) {
       await page.click(button);
-      const input = page.locator('#detail form input');
+      const input = page.locator('#card-body form input');
       await input.fill(value);
-      await page.locator('#detail form button[type=submit]').click();
+      await page.locator('#card-body form button[type=submit]').click();
     }
+
+    it('footer shows usage', async () => {
+      await page.waitForFunction(() => document.getElementById('usage').textContent);
+      assert.match(await page.locator('#usage').textContent(), /of/);
+    });
 
     it('creates a folder and a file inside it', async () => {
       await row('').click();
@@ -74,6 +81,18 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       assert.equal(await row('notes/todo.txt').count(), 0);
     });
 
+    it('clicking a path part selects that folder', async () => {
+      await row('notes/done.txt').click();
+      await page.locator('#crumbs button', { hasText: 'notes' }).click();
+      await page.waitForFunction(() => document.querySelector('.row[data-path="notes"]').classList.contains('selected'));
+    });
+
+    it('rows have type icons', async () => {
+      const rows = await page.locator('.row').count();
+      assert.ok(rows > 1);
+      assert.equal(await page.locator('.row svg').count(), rows);
+    });
+
     it('shows a SQLite file as a database with a byte preview', async () => {
       await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
@@ -93,7 +112,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
     it('deletes a folder after asking', async () => {
       await row('notes').click();
       await page.click('#delete');
-      await page.locator('#detail button.danger', { hasText: 'Delete' }).click();
+      await page.locator('#card-body button.danger', { hasText: 'Delete' }).click();
       await page.waitForFunction(() => !document.querySelector('.row[data-path="notes"]'));
       assert.match(await status().textContent(), /Deleted notes/);
     });
@@ -107,6 +126,36 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await page.click('#refresh');
       await page.selectOption('#area', 'bucket:app-db');
       await row('bucket.db').waitFor();
+    });
+
+    it('dark theme', async () => {
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await page.reload();
+      await row('').waitFor();
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+    });
+
+    it('axe finds no serious violations', async () => {
+      await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const file = await root.getFileHandle('readme.md', { create: true });
+        const writable = await file.createWritable();
+        await writable.write('# Hello');
+        await writable.close();
+      });
+      const modes = [{ colorScheme: 'light' }, { colorScheme: 'dark' }, { colorScheme: 'light', forcedColors: 'active' }];
+      for (const media of modes) {
+        await page.emulateMedia({ forcedColors: 'none', ...media });
+        await page.reload();
+        for (const path of ['readme.md', 'app.db']) {
+          await row(path).click();
+          await page.locator('#card-tabs [role=tab]').first().waitFor();
+          await page.waitForFunction(() => /of|not available/.test(document.getElementById('usage').textContent));
+          const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+          const bad = violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
+          assert.deepEqual(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(' ')}`), [], `${JSON.stringify(media)} ${path}`);
+        }
+      }
     });
   });
 }

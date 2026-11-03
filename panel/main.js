@@ -1,5 +1,6 @@
 // Start-up: wires the toolbar and loads the first listing.
 import { onNavigated } from './transport.js';
+import { applyTheme } from './theme.js';
 import { els, state, setStatus } from './state.js';
 import { refresh, updateButtons } from './tree.js';
 import { create, rename, remove, download, upload } from './actions.js';
@@ -40,5 +41,6 @@ onNavigated(() => {
   refresh();
 });
 
+applyTheme();
 updateButtons();
 refresh();
