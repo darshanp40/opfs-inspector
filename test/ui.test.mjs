@@ -243,6 +243,69 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       assert.ok((await p.locator('.row').count()) < 200);
       await p.keyboard.press('End');
       assert.equal(await p.evaluate(() => document.activeElement.querySelector('.name').textContent), 'f09999.txt');
+      // Shift+End also scrolls the focused row into view.
+      await p.keyboard.press('Home');
+      await p.keyboard.press('Shift+End');
+      assert.equal(await focused(p), 'big/f09999.txt');
+      assert.ok(await p.evaluate(() => {
+        const row = document.activeElement.getBoundingClientRect();
+        const tree = document.getElementById('tree').getBoundingClientRect();
+        return row.top >= tree.top && row.bottom <= tree.bottom;
+      }), 'last row is inside the tree viewport');
+      await p.context().close();
+    });
+
+    it('rows fill the tree when it grows', async () => {
+      const p = await freshPage(manyNames(500));
+      await p.setViewportSize({ width: 1000, height: 220 });
+      await p.reload();
+      await p.locator('.row[data-path="f00000.txt"]').waitFor();
+      await p.setViewportSize({ width: 1000, height: 1400 });
+      // The last drawn row reaches the bottom of the visible tree, with no scroll.
+      await p.waitForFunction(() => {
+        const tree = document.getElementById('tree');
+        const rows = [...tree.querySelectorAll('.row')];
+        return tree.clientHeight > 1000 && Math.max(...rows.map((r) => r.offsetTop + r.offsetHeight)) >= tree.scrollTop + tree.clientHeight;
+      }, null, { timeout: 2000 });
+      await p.context().close();
+    });
+
+    it('typing a capital letter jumps without selecting a range', async () => {
+      const p = await freshPage(['a.txt', 'Report.txt', 'z.txt']);
+      await p.reload();
+      await p.locator('.row[data-path="a.txt"]').click();
+      await p.keyboard.press('Shift+R');
+      assert.equal(await focused(p), 'Report.txt');
+      assert.equal(await p.locator('#tree [aria-selected="true"]').count(), 1);
+      await p.context().close();
+    });
+
+    it('collapsing a folder drops its hidden rows from the selection', async () => {
+      const p = await freshPage(['x.txt', 'y.txt'], 'd');
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('d').click();
+      await p.keyboard.press('ArrowRight');
+      await r('d/x.txt').click();
+      await r('d/y.txt').click({ modifiers: ['ControlOrMeta'] });
+      assert.match(await p.locator('#status').textContent(), /2 items selected/);
+      await r('d').locator('.twisty').click();
+      await p.waitForFunction(() => !document.querySelector('.row[data-path="d/x.txt"]'));
+      assert.doesNotMatch(await p.locator('#status').textContent(), /items selected/);
+      await r('d').locator('.twisty').click();
+      await r('d/x.txt').waitFor();
+      assert.equal(await p.locator('#tree [aria-selected="true"]').count(), 0);
+      await p.context().close();
+    });
+
+    it('a Shift range never selects the root', async () => {
+      const p = await freshPage(['f1.txt', 'f2.txt']);
+      await p.reload();
+      await p.locator('.row[data-path="f2.txt"]').click();
+      await p.keyboard.press('Shift+Home');
+      assert.equal(await focused(p), '');
+      assert.equal(await p.locator('.row[data-path=""]').getAttribute('aria-selected'), 'false');
+      assert.equal(await p.locator('#tree [aria-selected="true"]').count(), 2);
       await p.context().close();
     });
 

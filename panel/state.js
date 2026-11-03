@@ -37,9 +37,10 @@ export function selectionChanged() {
 }
 
 // Selects one item, or nothing, and shows it on the card.
+// The root can be shown on the card but is never in the selection.
 export function selectOnly(entry) {
   state.selected = entry;
-  state.selection = new Set(entry ? [entry.path] : []);
+  state.selection = new Set(entry && entry.path !== '' ? [entry.path] : []);
   state.anchor = entry ? entry.path : null;
   if (entry) state.focus = entry.path;
   selectionChanged();

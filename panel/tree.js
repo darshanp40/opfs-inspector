@@ -236,6 +236,8 @@ const itemAt = (target) => {
 };
 
 els.tree.addEventListener('scroll', () => drawRows(false));
+// A tree that grows needs more rows drawn.
+new ResizeObserver(() => drawRows(false)).observe(els.tree);
 
 // A click or Tab moves the roving tabindex to that row.
 els.tree.addEventListener('focusin', (event) => {
@@ -298,25 +300,45 @@ els.tree.addEventListener('keydown', (event) => {
   } else return;
   event.preventDefault();
   if (!to) return;
-  if (event.shiftKey && event.key !== ' ') selectRange(to);
+  // Shift extends the selection only with arrows, Home and End, not with typed capitals.
+  if (event.shiftKey && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) selectRange(to);
   else moveFocus(to.path);
 });
 
 function moveFocus(path) {
   state.focus = path;
+  scrollToRow(path);
+  drawRows(true);
+}
+
+function scrollToRow(path) {
   const i = rows.findIndex((r) => !r.empty && r.path === path);
   const h = rowHeight();
   const tree = els.tree;
   if (i * h < tree.scrollTop) tree.scrollTop = i * h;
   else if ((i + 1) * h > tree.scrollTop + tree.clientHeight) tree.scrollTop = (i + 1) * h - tree.clientHeight;
-  drawRows(true);
 }
+
+// Paths inside a folder. Every path except the root is inside the root.
+const inside = (folder, path) => (folder === '' ? path !== '' : path.startsWith(`${folder}/`));
+
+const selectedStatus = () => {
+  const n = state.selection.size;
+  setStatus(n > 1 ? `${n} items selected.` : '');
+};
 
 export async function toggle(path) {
   try {
     if (state.expanded.has(path)) {
       state.expanded.delete(path);
-      for (const p of [...state.expanded]) if (p.startsWith(`${path}/`)) state.expanded.delete(p);
+      for (const p of [...state.expanded]) if (inside(path, p)) state.expanded.delete(p);
+      // Hidden rows leave the selection, so counts and bulk actions match what is shown.
+      const shown = [...state.selection].filter((p) => !inside(path, p));
+      if (shown.length !== state.selection.size) {
+        state.selection = new Set(shown);
+        selectionChanged();
+        selectedStatus();
+      }
     } else {
       await loadFolder(path);
       state.expanded.add(path);
@@ -346,16 +368,18 @@ export async function select(path, kind) {
 // Several items: the card shows the item last clicked (or keeps its item).
 function setSelection(paths, item) {
   const moved = item && (!state.selected || state.selected.path !== item.path);
-  state.selection = new Set(paths);
+  // The root is never in the selection, so no bulk action can target it.
+  state.selection = new Set([...paths].filter((p) => p !== ''));
   if (item) {
     state.selected = { path: item.path, kind: item.kind };
     state.focus = item.path;
   }
   selectionChanged();
+  // The status line changes the tree's height, so scroll after it.
+  selectedStatus();
+  if (item) scrollToRow(item.path);
   renderTree();
   updateButtons();
-  const n = state.selection.size;
-  setStatus(n > 1 ? `${n} items selected.` : '');
   if (moved) showDetail();
 }
 
@@ -379,10 +403,10 @@ function selectRange(item) {
   setSelection(list.slice(Math.min(from, to), Math.max(from, to) + 1).map((r) => r.path), item);
 }
 
-// Every shown item except the root, which cannot be acted on.
+// Every shown item except the root, which setSelection leaves out.
 function selectAll() {
   if (blocked(null)) return;
-  setSelection(items().filter((r) => r.path !== '').map((r) => r.path), null);
+  setSelection(items().map((r) => r.path), null);
 }
 
 export function updateButtons() {
