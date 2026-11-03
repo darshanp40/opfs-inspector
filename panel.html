@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>OPFS Inspector</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header class="toolbar">
+    <label>Storage
+      <select id="area" title="Storage area"></select>
+    </label>
+    <button id="refresh" title="Read the files again">Refresh</button>
+    <span class="sep"></span>
+    <button id="new-file" title="Create a file in the selected folder">New file</button>
+    <button id="new-folder" title="Create a folder in the selected folder">New folder</button>
+    <button id="upload" title="Copy files from your computer into the selected folder">Upload</button>
+    <input id="upload-input" type="file" multiple hidden>
+    <span class="sep"></span>
+    <button id="rename" title="Rename the selected item">Rename</button>
+    <button id="download" title="Save the selected file to your computer">Download</button>
+    <button id="delete" class="danger" title="Delete the selected item">Delete</button>
+    <span id="origin" class="origin"></span>
+  </header>
+  <div id="status" class="status" role="status"></div>
+  <main class="layout">
+    <nav id="tree" class="tree" aria-label="Files"></nav>
+    <section id="detail" class="detail"></section>
+  </main>
+  <script src="panel.js"></script>
+</body>
+</html>
