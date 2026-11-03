@@ -22,7 +22,8 @@ function collect(stmt, max) {
       truncated = true;
       break;
     }
-    rows.push(stmt.get());
+    // Integers come as BigInt, so 64-bit values are not rounded.
+    rows.push(stmt.get(null, { useBigInt: true }));
   }
   return { columns, rows, truncated };
 }
@@ -51,7 +52,7 @@ const handlers = {
   },
   rows({ table, offset, limit = 100 }) {
     const types = select(`PRAGMA table_info(${quote(table)})`).rows.map((r) => r[2]);
-    const total = select(`select count(*) from ${quote(table)}`).rows[0][0];
+    const total = Number(select(`select count(*) from ${quote(table)}`).rows[0][0]);
     const page = select(`select * from ${quote(table)} limit ? offset ?`, [Math.min(limit, MAX_ROWS), offset]);
     return { ...page, types, total };
   },

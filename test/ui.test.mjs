@@ -14,6 +14,7 @@ let origin;
 let dbBase64; // a database with table t (250 rows) and view v
 let bigOld; // a 1 MB database whose names start with "old"
 let bigNew; // the same database after a commit renamed every row to "new"
+let bigIntDb; // table b with 64-bit integers that a JS number would round
 let walMid; // WAL mode: {db, wal} with every row renamed to "mid" in the -wal file
 let walRestarted; // after a checkpoint and a new -wal file that renames the last row
 before(async () => ({ server, origin } = await startServer()));
@@ -36,6 +37,10 @@ before(async () => {
   big.close();
   bigNew = (await readDisk(join(dir, 'big.db'))).toString('base64');
   assert.equal(bigOld.length, bigNew.length);
+  const ints = new DatabaseSync(join(dir, 'ints.db'));
+  ints.exec('create table b (n integer); insert into b values (9007199254740993), (-9223372036854775808), (7)');
+  ints.close();
+  bigIntDb = (await readDisk(join(dir, 'ints.db'))).toString('base64');
   // Files are read while the connection is open, so the -wal file stays.
   const walFile = join(dir, 'wal.db');
   const w = new DatabaseSync(walFile);
@@ -808,6 +813,20 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       after: { 'app.db': walRestarted.db, 'app.db-wal': walRestarted.wal },
       first: /^mid /,
     }));
+
+    it('64-bit integers show exactly', async () => {
+      const p = await freshPage([]);
+      await p.evaluate(async (b64) => {
+        const w = await (await (await navigator.storage.getDirectory()).getFileHandle('app.db', { create: true })).createWritable();
+        await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        await w.close();
+      }, bigIntDb);
+      await p.reload();
+      await p.locator('.row[data-path="app.db"]').click();
+      await p.locator('.sql-view .count', { hasText: 'Rows 1–3 of 3' }).waitFor();
+      assert.deepEqual(await p.locator('.grid tbody td').allTextContents(), ['9007199254740993', '-9223372036854775808', '7']);
+      await p.context().close();
+    });
 
     it('sqlite bundle and wasm load only on first open', async () => {
       const p = await freshPage(['a.txt']);
