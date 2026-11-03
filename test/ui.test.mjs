@@ -421,21 +421,136 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       }
     });
 
-    it('a toolbar tooltip keeps its text and Esc hides it', async () => {
+    it('a toolbar tooltip is visible on hover and focus, and Esc hides it', async () => {
       const p = await freshPage([]);
       await p.reload();
+      // The pseudo-element must be generated, shown and sized.
       const tip = () => p.evaluate(() => {
         const after = getComputedStyle(document.getElementById('new-file'), '::after');
-        return after.display === 'none' ? 'none' : document.getElementById('new-file').dataset.tip;
+        const shown = after.display !== 'none' && after.visibility === 'visible' && Number(after.opacity) > 0
+          && after.content !== 'none' && after.content !== 'normal' && parseFloat(after.width) > 0;
+        return shown ? after.content : 'hidden';
       });
-      await p.locator('#new-file').focus();
+      // Firefox reports the unresolved attr(data-tip).
+      const TIP = /Create a file in the selected folder|attr\(data-tip\)/;
+      assert.equal(await tip(), 'hidden');
+      await p.hover('#new-file');
+      assert.match(await tip(), TIP);
+      await p.keyboard.press('Escape');
+      assert.equal(await tip(), 'hidden');
+      await p.mouse.move(400, 300);
+      await p.focus('#refresh');
+      await p.keyboard.press('Tab');
+      await p.keyboard.press('Tab');
+      await p.keyboard.press('Shift+Tab');
       await p.keyboard.press('Shift+Tab');
       await p.keyboard.press('Tab');
-      assert.match(await tip(), /Create a file in the selected folder/);
+      assert.equal(await p.evaluate(() => document.activeElement.id), 'new-file');
+      assert.match(await tip(), TIP);
       await p.mouse.move(300, 300);
-      assert.match(await tip(), /Create a file/, 'stays while focused');
+      assert.match(await tip(), TIP, 'stays while focused');
       await p.keyboard.press('Escape');
-      assert.equal(await tip(), 'none');
+      assert.equal(await tip(), 'hidden');
+      await p.context().close();
+    });
+
+    it('Alt/letters: another layout\'s key does not run a command', async () => {
+      const p = await freshPage(['a.txt', 'b.txt']);
+      await p.reload();
+      await p.locator('.row[data-path="a.txt"]').click();
+      await p.evaluate(() => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'q', code: 'KeyA', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true,
+      })));
+      assert.equal(await p.locator('#tree [aria-selected="true"]').count(), 1);
+      await p.context().close();
+    });
+
+    it('tree keys typed into the rename box or the editor run nothing', async () => {
+      const p = await freshPage(['a.txt', 'b.txt']);
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('a.txt').click();
+      await p.locator('#card-tabs [role=tab]').first().waitFor();
+      await p.keyboard.press('F2');
+      const input = p.locator('#card-body form input');
+      await input.fill('x');
+      for (const key of ['?', 'Backspace', 'Delete', 'ControlOrMeta+a', 'ControlOrMeta+d', 'ControlOrMeta+Backspace']) await input.press(key);
+      assert.equal(await p.locator('#help[open]').count(), 0);
+      assert.equal(await p.locator('#card-body .actions', { hasText: 'Delete' }).count(), 0);
+      assert.equal(await p.locator('#tree [aria-selected="true"]').count(), 1);
+      await p.locator('#card-body form button', { hasText: 'Cancel' }).click();
+      await p.locator('.row[data-path="a.txt"]').click();
+      const editor = p.locator('textarea.editor');
+      await editor.fill('abc');
+      for (const key of ['?', 'Backspace', 'Delete', 'ControlOrMeta+a', 'ControlOrMeta+d', 'ControlOrMeta+Backspace']) await editor.press(key);
+      assert.equal(await p.locator('#help[open]').count(), 0);
+      assert.equal(await p.locator('#card-body .actions', { hasText: 'Delete' }).count(), 0);
+      assert.equal(await p.locator('#tree .row').count(), 3);
+      assert.equal(await p.locator('#tree [aria-selected="true"]').count(), 1);
+      await p.context().close();
+    });
+
+    it('Mod+Shift+Z in the editor discards edits', async () => {
+      const p = await freshPage(['a.txt']);
+      await p.reload();
+      await p.locator('.row[data-path="a.txt"]').click();
+      const editor = p.locator('textarea.editor');
+      await editor.fill('changed');
+      assert.equal(await p.evaluate(() => document.querySelector('[data-cmd=discard]').disabled), false);
+      await editor.press('ControlOrMeta+Shift+z');
+      assert.equal(await editor.inputValue(), '');
+      assert.equal(await p.evaluate(() => document.querySelector('[data-cmd=discard]').disabled), true);
+      await p.locator('.row[data-path="a.txt"]').click();
+      assert.doesNotMatch(await p.locator('#status').textContent(), /Save or discard/);
+      await p.context().close();
+    });
+
+    it('tab keys and collapse-all keep unsaved edits and move focus', async () => {
+      const p = await freshPage(['d/', 'a.txt']);
+      await p.evaluate(async () => (await (await navigator.storage.getDirectory()).getDirectoryHandle('d')).getFileHandle('in.txt', { create: true }));
+      await p.reload();
+      await p.locator('.row[data-path="d"]').click();
+      await p.keyboard.press('ArrowRight');
+      await p.locator('.row[data-path="d/in.txt"]').click();
+      const editor = p.locator('textarea.editor');
+      await editor.fill('keep me');
+      await editor.press('ControlOrMeta+Alt+ArrowRight');
+      assert.equal(await p.evaluate(() => document.activeElement.getAttribute('role')), 'tab');
+      assert.equal(await p.evaluate(() => document.activeElement.getAttribute('aria-selected')), 'true');
+      await p.keyboard.press('ControlOrMeta+Alt+ArrowLeft');
+      await p.keyboard.press('ControlOrMeta+Shift+ArrowLeft');
+      await p.locator('.row[data-path="d/in.txt"]').waitFor({ state: 'detached' });
+      assert.equal(await editor.inputValue(), 'keep me');
+      assert.equal(await p.evaluate(() => document.querySelector('[data-cmd=save]').disabled), false);
+      await p.context().close();
+    });
+
+    it('the menu closes on outside click, scroll and resize', async () => {
+      const p = await freshPage(manyNames(200));
+      await p.reload();
+      const open = async () => {
+        await p.locator('.row[data-path="f00001.txt"]').click({ button: 'right' });
+        await p.locator('[role=menu]').waitFor();
+      };
+      await open();
+      await p.locator('#card').click();
+      await p.locator('[role=menu]').waitFor({ state: 'detached' });
+      await open();
+      await p.evaluate(() => { document.getElementById('tree').scrollTop += 50; });
+      await p.locator('[role=menu]').waitFor({ state: 'detached' });
+      await open();
+      await p.setViewportSize({ width: 700, height: 500 });
+      await p.locator('[role=menu]').waitFor({ state: 'detached' });
+      await p.context().close();
+    });
+
+    it('a focused menu item has an outline in forced colors', async () => {
+      const p = await freshPage(['a.txt']);
+      await p.emulateMedia({ forcedColors: 'active' });
+      await p.reload();
+      await p.locator('.row[data-path="a.txt"]').click({ button: 'right' });
+      await p.locator('[role=menu]').waitFor();
+      assert.notEqual(await p.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), 'none');
       await p.context().close();
     });
 

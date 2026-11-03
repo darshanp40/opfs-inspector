@@ -42,6 +42,7 @@ const stepTab = (step) => {
   const at = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
   const next = tabs[(at + step + tabs.length) % tabs.length];
   next.click();
+  next.focus();
   setStatus(`${next.textContent} tab.`);
 };
 const hasTabs = () => els.cardTabs.children.length > 1;
@@ -79,7 +80,7 @@ register({
   id: 'save', label: 'Save', keys: 'Mod+S', scope: 'editor', swallow: true, typing: true,
   when: () => state.dirty, run: () => editorButton('save').click(),
 });
-register({ id: 'discard', label: 'Discard changes', keys: 'Mod+Shift+Z', when: () => state.dirty, run: () => editorButton('discard').click() });
+register({ id: 'discard', label: 'Discard changes', keys: 'Mod+Shift+Z', scope: 'editor', typing: true, when: () => state.dirty, run: () => editorButton('discard').click() });
 register({ id: 'select-all', label: 'Select all', keys: 'Mod+A', scope: 'tree', when: () => !!focusedItem(), run: selectAll });
 register({
   id: 'copy-path', label: 'Copy path', keys: 'Mod+Alt+C', menu: true, when: () => state.selection.size > 0,

@@ -54,8 +54,11 @@ function matches(k, event) {
   if (k.mod !== (mac ? event.metaKey : event.ctrlKey) || k.alt !== event.altKey) return false;
   // "?" needs Shift on most keyboards, so Shift is not compared for it.
   if (k.key !== '?' && k.shift !== event.shiftKey) return false;
-  // Alt changes event.key on macOS, so letters also match by physical key.
-  if (/^[a-z]$/i.test(k.key)) return event.key.toLowerCase() === k.key.toLowerCase() || event.code === `Key${k.key.toUpperCase()}`;
+  // Alt changes event.key on macOS to a non-letter, so only then match by physical key.
+  if (/^[a-z]$/i.test(k.key)) {
+    if (/^[a-z]$/i.test(event.key)) return event.key.toLowerCase() === k.key.toLowerCase();
+    return event.code === `Key${k.key.toUpperCase()}`;
+  }
   return event.key === (NAMED[k.key] || k.key);
 }
 

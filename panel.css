@@ -195,3 +195,7 @@ dialog h2 { margin: 0; font-size: 15px; }
 .help-scroll th, .help-scroll td { padding: 3px 8px; text-align: left; border-bottom: 1px solid var(--line); }
 .help-scroll .keys { white-space: nowrap; font-family: ui-monospace, monospace; }
 dialog form { align-self: flex-end; margin: 0; }
+@media (forced-colors: active) {
+  .menu { border-color: CanvasText; }
+  .menu [role=menuitem]:focus { outline: 2px solid Highlight; outline-offset: -2px; }
+}

@@ -62,12 +62,16 @@ export function openMenu(x, y, list) {
     if (!menu.contains(event.target)) closeMenu();
   };
   document.addEventListener('pointerdown', outside, true);
+  document.addEventListener('scroll', closeMenu, true);
   window.addEventListener('blur', closeMenu);
+  window.addEventListener('resize', closeMenu);
   open = {
     menu,
     stop: () => {
       document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('scroll', closeMenu, true);
       window.removeEventListener('blur', closeMenu);
+      window.removeEventListener('resize', closeMenu);
     },
   };
   document.body.append(menu);
