@@ -29,6 +29,9 @@ export function renderMarkdown(text) {
     RETURN_DOM_FRAGMENT: true,
     USE_PROFILES: { html: true },
     FORBID_TAGS: ['style', 'iframe', 'form', 'object', 'embed', 'img', 'picture', 'source', 'video', 'audio', 'track', 'link'],
-    FORBID_ATTR: ['style', 'src', 'srcset', 'poster'],
+    // Attributes that fetch a URL, and ones that could pass for the panel's
+    // own markup (ids, classes, data-cmd).
+    FORBID_ATTR: ['style', 'src', 'srcset', 'poster', 'background', 'action', 'formaction', 'ping', 'xlink:href', 'id', 'class'],
+    ALLOW_DATA_ATTR: false,
   });
 }

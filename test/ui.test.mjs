@@ -1499,6 +1499,60 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       assert.match(await page.locator('#card-body .markdown').textContent(), /a cat/);
     });
 
+    it('markdown makes no request through any attribute', async () => {
+      const url = (n) => `${origin}/fetched/${n}`;
+      await putText('urls.md', [
+        `<table background="${url('table')}"><tr><th background="${url('th')}">a</th><td background="${url('td')}">b</td></tr></table>`,
+        `<input type="image" src="${url('input')}" alt="i">`,
+        `<video poster="${url('poster')}"></video><audio src="${url('audio')}"></audio>`,
+        `<picture><source srcset="${url('source')}"><img srcset="${url('srcset')}" alt="s"></picture>`,
+        `<div style="background:url(${url('style')})">d</div><style>@import url(${url('import')});</style>`,
+        `<svg><image href="${url('svg')}" xlink:href="${url('xlink')}"></image></svg>`,
+        `<object data="${url('object')}"></object><embed src="${url('embed')}"><iframe src="${url('iframe')}"></iframe>`,
+        `<link rel="stylesheet" href="${url('link')}"><link rel="prefetch" href="${url('prefetch')}">`,
+        `<form action="${url('form')}"><button formaction="${url('formaction')}">f</button></form>`,
+        `<a ping="${url('ping')}" href="https://example.com">p</a>`,
+        `<body background="${url('body')}"><meta http-equiv="refresh" content="0;url=${url('meta')}">`,
+      ].join('\n\n'));
+      const requests = [];
+      page.on('request', (r) => { if (r.url().includes('/fetched/')) requests.push(r.url()); });
+      await page.reload();
+      await row('urls.md').click();
+      await page.locator('#card-body .markdown table').waitFor();
+      await page.waitForTimeout(500);
+      assert.deepEqual(requests, []);
+      const kept = await page.evaluate(() => [...document.querySelectorAll('#card-body .markdown *')]
+        .flatMap((e) => [...e.attributes].map((a) => a.name))
+        .filter((n) => ['background', 'src', 'srcset', 'poster', 'action', 'formaction', 'ping', 'style', 'xlink:href', 'data'].includes(n)));
+      assert.deepEqual(kept, []);
+    });
+
+    it('markdown cannot take over panel commands or ids', async () => {
+      await putText('hijack.md', '<a data-cmd="save" href="https://example.com">save</a>\n\n<div id="tab-0" class="primary" data-x="1">p</div>');
+      await page.reload();
+      await row('hijack.md').click();
+      await page.locator('#card-body .markdown div').waitFor();
+      const attrs = await page.evaluate(() => [...document.querySelectorAll('#card-body .markdown *')]
+        .flatMap((e) => [...e.attributes].map((a) => a.name))
+        .filter((n) => n === 'id' || n === 'class' || n.startsWith('data-')));
+      assert.deepEqual(attrs, []);
+      assert.equal(await page.locator('[id="tab-0"]').count(), 1);
+      // Even a command button inside the preview is not the panel's own.
+      await page.evaluate(() => {
+        const fake = document.createElement('button');
+        fake.dataset.cmd = 'save';
+        fake.onclick = () => { window.__hijacked = true; };
+        document.querySelector('#card-body .markdown').prepend(fake);
+      });
+      await page.getByRole('tab', { name: 'Editor' }).click();
+      await page.locator('.cm-content').click();
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.type('# Mine');
+      await page.keyboard.press('ControlOrMeta+s');
+      await page.waitForFunction(() => document.getElementById('status').textContent.includes('Saved'));
+      assert.equal(await page.evaluate(() => window.__hijacked), undefined);
+    });
+
     it('axe finds no serious violations', async () => {
       await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();

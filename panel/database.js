@@ -300,7 +300,7 @@ export function queryView(item) {
   return box;
 }
 
-const runButton = () => document.querySelector('#card-body [data-cmd="run-query"]');
+const runButton = () => document.querySelector('#card-body [data-cmd="run-query"]:not(.markdown *)');
 register({
   id: 'run-query', label: 'Run query', keys: 'Mod+Enter', scope: 'query', typing: true,
   when: () => !!runButton() && !runButton().disabled, run: () => runButton().click(),

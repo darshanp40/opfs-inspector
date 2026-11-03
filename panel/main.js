@@ -41,7 +41,8 @@ const openFolder = () => {
   const f = focusedItem();
   return !!f && f.kind === 'directory' && state.expanded.has(f.path);
 };
-const editorButton = (cmd) => els.cardBody.querySelector(`[data-cmd="${cmd}"]`);
+// Only the panel's own buttons, never one inside a Markdown preview.
+const editorButton = (cmd) => els.cardBody.querySelector(`[data-cmd="${cmd}"]:not(.markdown *)`);
 const stepTab = (step) => {
   const tabs = [...els.cardTabs.querySelectorAll('[role=tab]')];
   const at = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
