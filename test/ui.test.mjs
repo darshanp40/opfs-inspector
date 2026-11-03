@@ -165,7 +165,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       assert.deepEqual(await page.evaluate(() => [document.activeElement.parentElement.id, document.activeElement.textContent]), ['crumbs', 'notes']);
     });
 
-    it('opens an SVG file in the editor and saves it', async () => {
+    it('opens an SVG file with Preview and Editor, and saves it', async () => {
       await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
         const writable = await (await root.getFileHandle('dot.svg', { create: true })).createWritable();
@@ -175,7 +175,9 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await page.click('#refresh');
       await row('dot.svg').click();
       await page.locator('#card-head', { hasText: 'dot.svg' }).waitFor();
-      assert.deepEqual(await page.locator('#card-tabs [role=tab]').allTextContents(), ['Editor', 'Details']);
+      assert.deepEqual(await page.locator('#card-tabs [role=tab]').allTextContents(), ['Preview', 'Editor', 'Details']);
+      await page.locator('.image-port img').waitFor();
+      await page.getByRole('tab', { name: 'Editor' }).click();
       await page.locator('.cm-content').fill('<svg/>');
       await page.getByRole('button', { name: 'Save' }).click();
       await page.waitForFunction(() => document.getElementById('status').textContent.includes('Saved dot.svg'));
