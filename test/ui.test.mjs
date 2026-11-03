@@ -533,7 +533,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
     });
 
     it("shortcut hints use the platform's modifier", async () => {
-      for (const [platform, want, other] of [['MacIntel', '⌘⇧N', 'Ctrl'], ['Win32', 'Ctrl+Shift+N', '⌘']]) {
+      for (const [platform, want, other] of [['MacIntel', '⌥⇧N', 'Ctrl'], ['Win32', 'Alt+Shift+N', '⌘']]) {
         const p = await (await browser.newContext()).newPage();
         await p.addInitScript((value) => Object.defineProperty(navigator, 'platform', { get: () => value }), platform);
         await p.goto(`${origin}/panel.html?harness`);

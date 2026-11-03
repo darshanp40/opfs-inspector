@@ -117,11 +117,11 @@ for (const channel of ['chromium', 'msedge'].filter((c) => wanted.includes(c))) 
 
     // Synthetic keys skip the browser's own shortcuts, so this shows the panel
     // handles them, not that a real DevTools window lets them through.
-    it('Mod+Shift+N, Mod+U and Mod+D reach the panel', async () => {
+    it('Alt+Shift+N, Mod+U and Mod+D reach the panel', async () => {
       await panel.locator('.row[data-path="notes.txt"]').click();
       await panel.keyboard.press('ControlOrMeta+d');
       await panel.locator('.row[data-path="notes copy.txt"]').waitFor();
-      await panel.keyboard.press('ControlOrMeta+Shift+N');
+      await panel.keyboard.press('Alt+Shift+N');
       await panel.locator('#card-body form input').waitFor();
       await panel.locator('#card-body form button', { hasText: 'Cancel' }).click();
       const chooser = panel.waitForEvent('filechooser', { timeout: 5000 });
