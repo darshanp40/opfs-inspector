@@ -1150,6 +1150,50 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.context().close();
     });
 
+    // A 3x2 PNG written into the site's storage.
+    const putPng = (name) => page.evaluate(async (name) => {
+      const canvas = new OffscreenCanvas(3, 2);
+      canvas.getContext('2d').fillRect(0, 0, 3, 2);
+      const blob = await canvas.convertToBlob({ type: 'image/png' });
+      const root = await navigator.storage.getDirectory();
+      const writable = await (await root.getFileHandle(name, { create: true })).createWritable();
+      await writable.write(blob);
+      await writable.close();
+    }, name);
+
+    it('png shows its pixel size', async () => {
+      await putPng('three.png');
+      await page.reload();
+      await row('three.png').click();
+      await page.locator('.image-port img').waitFor();
+      await page.waitForFunction(() => document.querySelector('.image-port img').naturalWidth === 3);
+      assert.match(await page.locator('.image-view .note').textContent(), /3 × 2 px/);
+    });
+
+    it('rotate turns it 90 degrees', async () => {
+      await page.getByRole('button', { name: 'Rotate' }).click();
+      assert.match(await page.locator('.image-port img').evaluate((img) => img.style.transform), /rotate\(90deg\)/);
+      await page.locator('.image-port').focus();
+      await page.keyboard.press('r');
+      assert.match(await page.locator('.image-port img').evaluate((img) => img.style.transform), /rotate\(180deg\)/);
+      await page.keyboard.press('+');
+      assert.match(await page.locator('.image-view .note').textContent(), /\d+%/);
+    });
+
+    it('svg with a script does not run it', async () => {
+      await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const writable = await (await root.getFileHandle('evil.svg', { create: true })).createWritable();
+        await writable.write('<svg xmlns="http://www.w3.org/2000/svg" onload="window.top.__pwned=1"><script>window.top.__pwned=1</script></svg>');
+        await writable.close();
+      });
+      await page.reload();
+      await row('evil.svg').click();
+      await page.locator('.image-port img').waitFor();
+      await page.waitForTimeout(300);
+      assert.equal(await page.evaluate(() => window.__pwned), undefined);
+    });
+
     it('axe finds no serious violations', async () => {
       await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
@@ -1159,6 +1203,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
         await writable.close();
         await root.getDirectoryHandle('empty', { create: true });
       });
+      await putPng('three.png');
       const modes = [{ colorScheme: 'light' }, { colorScheme: 'dark' }, { colorScheme: 'light', forcedColors: 'active' }];
       for (const media of modes) {
         await page.emulateMedia({ forcedColors: 'none', ...media });
@@ -1166,10 +1211,11 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
         await row('empty').click();
         await row('empty').press('ArrowRight');
         await page.locator('#tree .empty').waitFor();
-        for (const path of ['readme.md', 'app.db', 'empty']) {
+        for (const path of ['readme.md', 'app.db', 'empty', 'three.png']) {
           await row(path).click();
           await page.locator('#card-tabs [role=tab]').first().waitFor();
           if (path === 'readme.md') await page.locator('.cm-editor').waitFor();
+          if (path === 'three.png') await page.waitForFunction(() => document.querySelector('.image-port img')?.naturalWidth === 3);
           await page.waitForFunction(() => /of|not available/.test(document.getElementById('usage').textContent));
           const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
           const bad = violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');

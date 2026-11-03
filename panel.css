@@ -246,3 +246,9 @@ dialog form { align-self: flex-end; margin: 0; }
 @media (forced-colors: active) {
   .link-button { border: 1px solid ButtonText; color: ButtonText; }
 }
+
+/* Image preview. */
+.image-box, .image-view { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.image-port { flex: 1; min-height: 120px; overflow: auto; display: flex; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.image-port img { margin: auto; flex: none; max-width: none; }
+.image-port img[hidden] { display: none; }

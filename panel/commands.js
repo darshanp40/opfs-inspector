@@ -6,8 +6,11 @@ const commands = [];
 // Cmd on macOS, Ctrl elsewhere.
 const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform || (navigator.userAgentData && navigator.userAgentData.platform) || '');
 
+// "Mod+Shift+F" -> its parts. A key that is "+" itself ends the string.
+const split = (keys) => (keys.endsWith('+') ? [...keys.slice(0, -1).split('+').filter(Boolean), '+'] : keys.split('+'));
+
 const parse = (keys) => {
-  const parts = keys.split('+');
+  const parts = split(keys);
   const key = parts.pop();
   return { mod: parts.includes('Mod'), alt: parts.includes('Alt'), shift: parts.includes('Shift'), key };
 };
@@ -15,7 +18,7 @@ const parse = (keys) => {
 // {id, label, tip, keys, when, run, scope, typing, swallow, toolbar, menu}
 // keys: one string, or an array (the first is the one shown).
 // when(state) -> boolean enables the command.
-// scope: 'tree', 'editor' or '!editor' limits the keys to where focus is.
+// scope: 'tree', 'editor', 'preview' or '!editor' limits the keys to where focus is.
 // typing: the keys also work while a text field has focus.
 // swallow: the keys are taken even when the command is disabled.
 export function register(command) {
@@ -33,7 +36,7 @@ const MAC_MODS = { Mod: '⌘', Shift: '⇧', Alt: '⌥' };
 
 export function shortcutLabel(keys) {
   const mac = isMac();
-  const parts = keys.split('+').map((p) => {
+  const parts = split(keys).map((p) => {
     if (mac) return MAC_MODS[p] || MAC_NAMES[p] || p.toUpperCase();
     return p === 'Mod' ? 'Ctrl' : p.length === 1 ? p.toUpperCase() : p;
   });
@@ -52,8 +55,8 @@ function matches(k, event) {
   const mac = isMac();
   if (mac ? event.ctrlKey : event.metaKey) return false;
   if (k.mod !== (mac ? event.metaKey : event.ctrlKey) || k.alt !== event.altKey) return false;
-  // "?" needs Shift on most keyboards, so Shift is not compared for it.
-  if (k.key !== '?' && k.shift !== event.shiftKey) return false;
+  // "?" and "+" need Shift on most keyboards, so Shift is not compared for them.
+  if (k.key !== '?' && k.key !== '+' && k.shift !== event.shiftKey) return false;
   // Alt changes event.key on macOS to a non-letter, so only then match by physical key.
   if (/^[a-z]$/i.test(k.key)) {
     if (/^[a-z]$/i.test(event.key)) return event.key.toLowerCase() === k.key.toLowerCase();
@@ -67,6 +70,7 @@ const inScope = (scope) => {
   const inEditor = !!active && active.closest('.cm-editor') !== null;
   if (scope === 'tree') return !!active && active.closest('#tree') !== null;
   if (scope === 'editor') return inEditor;
+  if (scope === 'preview') return !!active && active.closest('.image-view') !== null;
   if (scope === '!editor') return !inEditor;
   return true;
 };

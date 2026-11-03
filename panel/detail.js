@@ -5,12 +5,15 @@ import { baseName, formatSize, fromBase64, formatJson } from './format.js';
 import { renderTree, reloadExpanded, showUsage } from './tree.js';
 import { iconFor, typeOf } from './icons.js';
 import { getSettings, onSettingsChange } from './settings.js';
+import { showImage, imageMime, IMAGE_LIMIT } from './image.js';
+import { download } from './actions.js';
 
 const TEXT_LIMIT = 2 * 1024 * 1024;
 const PREVIEW_BYTES = 4096;
 const SQLITE_HEADER = 'SQLite format 3\u0000';
 
 let openEditor = null; // the card's code editor, once it has loaded
+let openImage = null; // the card's image preview, once it has loaded
 
 function meta(pairs) {
   const dl = document.createElement('dl');
@@ -83,6 +86,7 @@ const TYPE_LABELS = {
 
 // Each renderer takes the item ({path, type, ...}) and returns a node.
 export const TABS = {
+  Preview: (item) => preview(item),
   Editor: (item) => editor(item.path, item.text),
   Bytes: (item) => {
     const pre = document.createElement('pre');
@@ -123,7 +127,8 @@ export const TABS = {
 };
 
 export function tabsFor(type) {
-  const names = TABS_BY_TYPE[type].filter((name) => name in TABS);
+  // Preview has a renderer for images only so far.
+  const names = TABS_BY_TYPE[type].filter((name) => name in TABS && (name !== 'Preview' || type === 'image' || type === 'svg'));
   // Until a type's own views exist, show its bytes.
   if (type !== 'folder' && names.length === 1) names.unshift('Bytes');
   return names;
@@ -226,6 +231,8 @@ export async function showDetail() {
   item.type = isSqlite ? 'sqlite' : typeOf({ name: baseName(sel.path), kind: 'file' });
   // SVG is an image that is also text, so it gets the editor.
   if (item.type === 'image' && /\.svg$/i.test(sel.path)) item.type = 'svg';
+  // A file with no image name can still start like one.
+  if (item.type === 'binary' && imageMime(baseName(sel.path), headBytes)) item.type = 'image';
   if (['text', 'json', 'code', 'markdown', 'svg', 'binary'].includes(item.type)) {
     // Any file that reads as text gets the editor, whatever its name.
     item.text = head.size <= TEXT_LIMIT
@@ -242,6 +249,10 @@ function drawCard(item) {
   if (openEditor) {
     openEditor.destroy();
     openEditor = null;
+  }
+  if (openImage) {
+    openImage.destroy();
+    openImage = null;
   }
   // A calculation dropped by a redraw leaves no stale message.
   if (state.sizing) {
@@ -341,6 +352,28 @@ function note(text, isError = false) {
   p.className = isError ? 'note error' : 'note';
   p.textContent = text;
   return p;
+}
+
+// The image is read when the tab opens. Over the limit, it offers Download.
+function preview(item) {
+  const box = document.createElement('div');
+  box.className = 'image-box';
+  if (item.size > IMAGE_LIMIT) {
+    const get = document.createElement('button');
+    get.textContent = 'Download';
+    get.addEventListener('click', download);
+    box.append(note(`This image is ${formatSize(item.size)}. Previews stop at ${formatSize(IMAGE_LIMIT)}.`), get);
+    return box;
+  }
+  const name = baseName(item.path);
+  box.append(note('Loading the image…'));
+  readAll(item.path, item.size).then((bytes) => {
+    // The card was redrawn while it loaded.
+    if (!box.isConnected) return;
+    const type = imageMime(name, item.headBytes) || 'application/octet-stream';
+    openImage = showImage(box, new Blob([bytes], { type }), name);
+  }).catch(fail);
+  return box;
 }
 
 // The editor loads on first use, so the panel opens without it.
