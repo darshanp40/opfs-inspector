@@ -646,6 +646,26 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
     });
 
     // On macOS Option+Shift+N types a character, so it must reach text fields.
+    it('Alt+Shift+N does not make a folder while typing', async () => {
+      const p = await freshPage(['a.txt']);
+      await p.reload();
+      await p.locator('.row[data-path="a.txt"]').click();
+      await p.keyboard.press('F2');
+      await p.locator('#card-body form input').press('Alt+Shift+N');
+      assert.match(await p.locator('#card-body form label').textContent(), /^New name\b/);
+      await p.locator('#card-body form button', { hasText: 'Cancel' }).click();
+      await p.locator('.cm-content').click();
+      await p.keyboard.press('Alt+Shift+N');
+      assert.equal(await p.locator('#card-body form').count(), 0);
+      // Firefox types a character there, Chromium does not.
+      await p.evaluate(() => document.querySelector('[data-cmd=discard]:not(:disabled)')?.click());
+      // From the tree it still works.
+      await p.locator('.row[data-path="a.txt"]').click();
+      await p.keyboard.press('Alt+Shift+N');
+      await p.locator('#card-body form label', { hasText: 'New folder name' }).waitFor();
+      await p.context().close();
+    });
+
     it('Mod+Shift+Z in the editor discards edits', async () => {
       const p = await freshPage(['a.txt']);
       await p.reload();

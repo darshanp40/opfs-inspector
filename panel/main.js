@@ -62,7 +62,7 @@ register({
   run: () => create('file'),
 });
 register({
-  id: 'new-folder', label: 'New folder', tip: 'Create a folder in the selected folder', keys: 'Alt+Shift+N', toolbar: true, menu: true, typing: true,
+  id: 'new-folder', label: 'New folder', tip: 'Create a folder in the selected folder', keys: 'Alt+Shift+N', toolbar: true, menu: true,
   run: () => create('directory'),
 });
 register({
