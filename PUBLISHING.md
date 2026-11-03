@@ -21,6 +21,7 @@ This makes `dist/opfs-inspector-<version>.zip` with only the files the browser n
 ## 3. What every store asks for
 
 - **Description**: the first paragraph of the README works.
+- **Ready-made listing text and images**: [store/listing.md](store/listing.md). `node scripts/store-images.mjs` remakes the promo tile and logo.
 - **Screenshots**: at least one of the panel in use, 1280×800 or 640×400 for Chrome.
 - **Icon**: 128×128, from `icons/icon-128.png`. A more polished icon is worth making before a public listing.
 - **Privacy**: the extension collects no data and sends nothing anywhere. Where a store asks for a privacy policy, link to [PRIVACY.md](PRIVACY.md).
