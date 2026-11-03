@@ -117,7 +117,7 @@ svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; s
 .icon-json { color: var(--i-json); }
 .icon-code { color: var(--i-code); }
 .icon-markdown { color: var(--i-markdown); }
-.icon-image { color: var(--i-image); }
+.icon-image, .icon-svg { color: var(--i-image); }
 .icon-sqlite { color: var(--i-sqlite); }
 
 .card { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }

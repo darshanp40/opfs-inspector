@@ -83,6 +83,8 @@ function renderCrumbs() {
   const path = state.selected ? state.selected.path : '';
   const parts = path ? path.split('/') : [];
   const items = [];
+  // Redrawing destroys the buttons, so give focus back to the same part.
+  const focused = els.crumbs.contains(document.activeElement) ? document.activeElement.dataset.path : null;
   for (let i = 0; i <= parts.length; i++) {
     const partPath = parts.slice(0, i).join('/');
     const last = i === parts.length;
@@ -95,6 +97,7 @@ function renderCrumbs() {
     }
     const button = document.createElement('button');
     button.className = 'crumb';
+    button.dataset.path = partPath;
     button.textContent = i === 0 ? areaName() : parts[i - 1];
     if (last) button.setAttribute('aria-current', 'location');
     const kind = last && state.selected ? state.selected.kind : 'directory';
@@ -102,6 +105,8 @@ function renderCrumbs() {
     items.push(button);
   }
   els.crumbs.replaceChildren(...items);
+  const again = focused != null && items.find((b) => b.dataset && b.dataset.path === focused);
+  if (again) again.focus();
 }
 
 export function renderTree() {
@@ -119,6 +124,9 @@ function addChildren(path, depth, rows) {
   if (list.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty';
+    // A tree may only hold tree items, so the note is a disabled one.
+    empty.setAttribute('role', 'treeitem');
+    empty.setAttribute('aria-disabled', 'true');
     empty.style.paddingLeft = `${8 + depth * 16 + 20}px`;
     empty.textContent = 'empty';
     rows.push(empty);

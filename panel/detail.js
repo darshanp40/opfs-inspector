@@ -67,12 +67,13 @@ const TABS_BY_TYPE = {
   code: ['Editor', 'Details'],
   markdown: ['Preview', 'Editor', 'Details'],
   image: ['Preview', 'Details'],
+  svg: ['Preview', 'Editor', 'Details'],
   sqlite: ['Table', 'Query', 'Details'],
   binary: ['Bytes', 'Details'],
 };
 const TYPE_LABELS = {
   folder: 'Folder', text: 'Text', json: 'JSON', code: 'Code', markdown: 'Markdown',
-  image: 'Image', sqlite: 'SQLite database', binary: 'Binary',
+  image: 'Image', svg: 'SVG image', sqlite: 'SQLite database', binary: 'Binary',
 };
 
 // Each renderer takes the item ({path, type, ...}) and returns a node.
@@ -153,7 +154,9 @@ export async function showDetail() {
   const item = { path: sel.path, size: head.size, lastModified: head.lastModified, headBytes };
   const isSqlite = new TextDecoder('latin1').decode(headBytes.subarray(0, 16)) === SQLITE_HEADER;
   item.type = isSqlite ? 'sqlite' : typeOf({ name: baseName(sel.path), kind: 'file' });
-  if (['text', 'json', 'code', 'markdown', 'binary'].includes(item.type)) {
+  // SVG is an image that is also text, so it gets the editor.
+  if (item.type === 'image' && /\.svg$/i.test(sel.path)) item.type = 'svg';
+  if (['text', 'json', 'code', 'markdown', 'svg', 'binary'].includes(item.type)) {
     // Any file that reads as text gets the editor, whatever its name.
     item.text = head.size <= TEXT_LIMIT
       ? decodeText(head.size <= headBytes.length ? headBytes : await readAll(sel.path, head.size)) : null;

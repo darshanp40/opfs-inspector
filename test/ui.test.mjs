@@ -87,6 +87,32 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await page.waitForFunction(() => document.querySelector('.row[data-path="notes"]').classList.contains('selected'));
     });
 
+    it('a crumb keeps focus after it is used', async () => {
+      await row('notes/done.txt').click();
+      await page.locator('#crumbs button', { hasText: 'notes' }).focus();
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => document.querySelector('.row[data-path="notes"]').classList.contains('selected'));
+      assert.deepEqual(await page.evaluate(() => [document.activeElement.parentElement.id, document.activeElement.textContent]), ['crumbs', 'notes']);
+    });
+
+    it('opens an SVG file in the editor and saves it', async () => {
+      await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const writable = await (await root.getFileHandle('dot.svg', { create: true })).createWritable();
+        await writable.write('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+        await writable.close();
+      });
+      await page.click('#refresh');
+      await row('dot.svg').click();
+      await page.locator('#card-head', { hasText: 'dot.svg' }).waitFor();
+      assert.deepEqual(await page.locator('#card-tabs [role=tab]').allTextContents(), ['Editor', 'Details']);
+      await page.locator('textarea.editor').fill('<svg/>');
+      await page.getByRole('button', { name: 'Save' }).click();
+      await page.waitForFunction(() => document.getElementById('status').textContent.includes('Saved dot.svg'));
+      const text = await page.evaluate(async () => (await (await (await navigator.storage.getDirectory()).getFileHandle('dot.svg')).getFile()).text());
+      assert.equal(text, '<svg/>');
+    });
+
     it('rows have type icons', async () => {
       const rows = await page.locator('.row').count();
       assert.ok(rows > 1);
@@ -142,12 +168,16 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
         const writable = await file.createWritable();
         await writable.write('# Hello');
         await writable.close();
+        await root.getDirectoryHandle('empty', { create: true });
       });
       const modes = [{ colorScheme: 'light' }, { colorScheme: 'dark' }, { colorScheme: 'light', forcedColors: 'active' }];
       for (const media of modes) {
         await page.emulateMedia({ forcedColors: 'none', ...media });
         await page.reload();
-        for (const path of ['readme.md', 'app.db']) {
+        await row('empty').click();
+        await row('empty').press('ArrowRight');
+        await page.locator('#tree .empty').waitFor();
+        for (const path of ['readme.md', 'app.db', 'empty']) {
           await row(path).click();
           await page.locator('#card-tabs [role=tab]').first().waitFor();
           await page.waitForFunction(() => /of|not available/.test(document.getElementById('usage').textContent));
