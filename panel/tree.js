@@ -6,7 +6,7 @@ import { showDetail } from './detail.js';
 import { iconFor } from './icons.js';
 import { commandsFor, syncToolbar } from './commands.js';
 import { openMenu } from './menu.js';
-import { moveTo, upload, targets } from './actions.js';
+import { moveTo, moveRefusal, upload, targets } from './actions.js';
 
 async function loadAreas() {
   const info = await call('areas');
@@ -322,6 +322,7 @@ els.tree.addEventListener('keydown', (event) => {
 // computer go into the folder they are dropped on, or the selected folder.
 let dragged = null; // items being dragged from the tree
 let marked = null;
+let refusal = null; // why the row under the pointer takes no drop
 
 function mark(el, name) {
   if (marked && (marked !== el || !marked.classList.contains(name))) marked.classList.remove('drop-target', 'drop-refused');
@@ -329,17 +330,17 @@ function mark(el, name) {
   if (el) el.classList.add(name);
 }
 
-// { folder, ok, el }: where a drop would go, and the element to mark.
+// { folder, ok, why, el }: where a drop would go, why not, and the element to mark.
 function dropAt(event) {
   const item = itemAt(event.target);
   const el = item ? event.target.closest('.row') : els.tree;
   if (dragged) {
-    if (!item || item.kind !== 'directory') return { ok: false, el: null };
-    // Not onto itself, its own folder, or anything inside it.
-    const ok = !dragged.some((d) => d.path === item.path || parentOf(d.path) === item.path || inside(d.path, item.path));
-    return { folder: item.path, ok, el };
+    if (!item || item.kind !== 'directory') return { ok: false, why: 'Drop onto a folder to move there.', el: null };
+    const why = moveRefusal(dragged, item.path);
+    return { folder: item.path, ok: !why, why, el };
   }
   if (!event.dataTransfer || ![...event.dataTransfer.types].includes('Files')) return { ok: false, el: null };
+  if (!state.canWrite) return { ok: false, why: 'This browser cannot change files from a page.', el };
   if (item && item.kind === 'directory') return { folder: item.path, ok: true, el };
   return { folder: undefined, ok: true, el: els.tree };
 }
@@ -353,15 +354,20 @@ els.tree.addEventListener('dragstart', (event) => {
   event.dataTransfer.setData('text/plain', dragged.map((d) => `/${d.path}`).join('\n'));
 });
 els.tree.addEventListener('dragend', () => {
+  // A refused drop fires no drop event, so say why here.
+  if (dragged && refusal) setStatus(refusal, 'error');
   dragged = null;
+  refusal = null;
   mark(null);
 });
 for (const type of ['dragenter', 'dragover']) {
   els.tree.addEventListener(type, (event) => {
-    const { ok, el } = dropAt(event);
+    const { ok, why, el } = dropAt(event);
+    refusal = why || null;
     mark(el, ok ? 'drop-target' : 'drop-refused');
-    // Not cancelling the event shows the "not allowed" cursor.
-    if (!ok) return;
+    // Not cancelling the event shows the "not allowed" cursor. Files from the
+    // computer are still taken when refused, so the drop can say why.
+    if (!ok && (dragged || !why)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = dragged ? 'move' : 'copy';
   });
@@ -369,13 +375,18 @@ for (const type of ['dragenter', 'dragover']) {
 els.tree.addEventListener('dragleave', (event) => {
   if (!els.tree.contains(event.relatedTarget)) mark(null);
 });
+// A refused drop also ends with a dragleave, so only a drag over the rest of the page clears the reason.
+document.addEventListener('dragover', (event) => {
+  if (!els.tree.contains(event.target)) refusal = null;
+});
 els.tree.addEventListener('drop', (event) => {
   event.preventDefault();
-  const { folder, ok } = dropAt(event);
+  const { folder, ok, why } = dropAt(event);
   const list = dragged;
   dragged = null;
+  refusal = null;
   mark(null);
-  if (!ok) return;
+  if (!ok) return why && setStatus(why, 'error');
   if (list) return moveTo(list, folder);
   // Entries must be taken now: the drop's data is gone once it returns.
   const files = [...event.dataTransfer.items].filter((i) => i.kind === 'file')

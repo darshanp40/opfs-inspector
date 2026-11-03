@@ -11,8 +11,12 @@ function targetFolder() {
   return sel.kind === 'directory' ? sel.path : parentOf(sel.path);
 }
 
+// Cancels the open question, if any. Only one is open at a time.
+let closePrompt = null;
+
 // Asks for a name at the top of the card. Resolves to null on cancel.
 function askName(label, initial = '') {
+  if (closePrompt) closePrompt();
   return new Promise((resolve) => {
     const form = document.createElement('form');
     form.className = 'actions prompt';
@@ -30,10 +34,12 @@ function askName(label, initial = '') {
     cancel.textContent = 'Cancel';
     form.append(text, ok, cancel);
     const done = (value) => {
+      closePrompt = null;
       form.remove();
       focusTree();
       resolve(value);
     };
+    closePrompt = () => done(null);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       done(input.value.trim() || null);
@@ -46,6 +52,7 @@ function askName(label, initial = '') {
 }
 
 function askConfirm(message, action) {
+  if (closePrompt) closePrompt();
   return new Promise((resolve) => {
     const box = document.createElement('div');
     box.className = 'actions prompt';
@@ -58,10 +65,12 @@ function askConfirm(message, action) {
     no.textContent = 'Cancel';
     box.append(text, yes, no);
     const done = (value) => {
+      closePrompt = null;
       box.remove();
       focusTree();
       resolve(value);
     };
+    closePrompt = () => done(false);
     yes.addEventListener('click', () => done(true));
     no.addEventListener('click', () => done(false));
     els.cardBody.prepend(box);
@@ -71,10 +80,8 @@ function askConfirm(message, action) {
 
 async function afterChange(message, selectPath, kind) {
   await reloadExpanded();
-  if (selectPath !== undefined) {
-    state.dirty = false;
-    selectOnly(selectPath === null ? null : { path: selectPath, kind });
-  }
+  // Unsaved edits keep their item on the card.
+  if (selectPath !== undefined && !state.dirty) selectOnly(selectPath === null ? null : { path: selectPath, kind });
   renderTree();
   updateButtons();
   showUsage();
@@ -87,6 +94,8 @@ export async function create(kind) {
   const folder = targetFolder();
   const name = await askName(kind === 'file' ? 'New file name' : 'New folder name');
   if (!name) return;
+  // The card can change while the question is open.
+  if (state.dirty) return setStatus('Save or discard your changes first.', 'error');
   const path = join(folder, name);
   try {
     await call(kind === 'file' ? 'createFile' : 'createFolder', { area: currentArea(), path });
@@ -102,6 +111,7 @@ export const targets = () => (state.selection.size ? selectedItems() : state.sel
 
 const saveFirst = () => setStatus('Save or discard your changes first.', 'error');
 const items = (n) => `${n} item${n === 1 ? '' : 's'}`;
+const files = (n) => `${n} file${n === 1 ? '' : 's'}`;
 
 // Keeps open folders open after a folder moves from one path to another.
 function moveExpanded(from, to) {
@@ -142,6 +152,7 @@ export async function rename() {
   if (state.dirty) return saveFirst();
   const newName = await askName('New name', baseName(sel.path));
   if (!newName || newName === baseName(sel.path)) return;
+  if (state.dirty) return saveFirst();
   try {
     await call('rename', { area: currentArea(), path: sel.path, newName });
     const newPath = join(parentOf(sel.path), newName);
@@ -164,9 +175,31 @@ export async function duplicate() {
   await report('Duplicated', list, failed);
 }
 
+const NO_WRITE = 'This browser cannot change files from a page.';
+
+// Why the items cannot move into folder, or null when they can.
+export function moveRefusal(list, folder) {
+  if (!state.canWrite) return NO_WRITE;
+  if (list.some((d) => d.path === folder || folder.startsWith(`${d.path}/`))) return 'A folder cannot be moved into itself.';
+  if (list.some((d) => parentOf(d.path) === folder)) return list.length === 1 ? 'It is already in that folder.' : 'One of the items is already in that folder.';
+  return null;
+}
+
+// Asks for a folder path, then moves the selected items there.
+export async function moveAsk() {
+  const list = targets().filter((t) => t.path);
+  if (!list.length) return;
+  if (state.dirty) return saveFirst();
+  const answer = await askName('Move to folder', `/${parentOf(list[0].path)}`);
+  if (answer == null) return;
+  await moveTo(list, answer.split('/').filter(Boolean).join('/'));
+}
+
 // Moves the items into folder.
 export async function moveTo(list, folder) {
   if (state.dirty) return saveFirst();
+  const why = moveRefusal(list, folder);
+  if (why) return setStatus(why, 'error');
   let last = null;
   const failed = await each(list, async (item) => {
     ({ path: last } = await call('move', { area: currentArea(), path: item.path, toDir: folder }));
@@ -185,6 +218,7 @@ export async function remove() {
   const what = list.length > 1 ? items(list.length)
     : one.kind === 'directory' ? `the folder ${baseName(one.path)} and everything in it` : baseName(one.path);
   if (!(await askConfirm(`Delete ${what}? This cannot be undone.`, 'Delete'))) return;
+  if (state.dirty) return saveFirst();
   const failed = await each(list, async (item) => {
     await call('remove', { area: currentArea(), path: item.path });
     state.expanded.delete(item.path);
@@ -271,37 +305,41 @@ async function writeFile(path, file) {
   } while (offset < file.size);
 }
 
-// A File, or a dropped FileSystemEntry. Resolves to the number of files written.
-async function put(item, path) {
-  if (item instanceof File) return writeFile(path, item).then(() => 1);
-  if (item.isFile) return writeFile(path, await new Promise((ok, no) => item.file(ok, no))).then(() => 1);
+// A File, or a dropped FileSystemEntry. Calls wrote() after each file.
+async function put(item, path, wrote) {
+  if (item instanceof File || item.isFile) {
+    await writeFile(path, item instanceof File ? item : await new Promise((ok, no) => item.file(ok, no)));
+    return wrote();
+  }
   await call('createFolder', { area: currentArea(), path });
   const reader = item.createReader();
-  let count = 0;
   // readEntries hands out a batch at a time, then an empty one.
   for (;;) {
     const batch = await new Promise((ok, no) => reader.readEntries(ok, no));
-    if (!batch.length) return count;
-    for (const child of batch) count += await put(child, join(path, child.name));
+    if (!batch.length) return;
+    for (const child of batch) await put(child, join(path, child.name), wrote);
   }
 }
 
 // Files, or dropped entries, go into folder. Names that exist there are skipped.
 export async function upload(list, folder = targetFolder()) {
+  if (!state.canWrite) return setStatus(NO_WRITE, 'error');
   const skipped = [];
   let done = 0;
+  const skips = () => (skipped.length ? ` Skipped ${skipped.join(', ')}: an item with that name exists.` : '');
   try {
     await loadFolder(folder);
     const existing = new Set(state.children.get(folder).map((e) => e.name));
     for (const item of list) {
       if (existing.has(item.name)) skipped.push(item.name);
-      else done += await put(item, join(folder, item.name));
+      else await put(item, join(folder, item.name), () => done++);
     }
     state.expanded.add(folder);
-    const message = `Uploaded ${done} file${done === 1 ? '' : 's'}.`
-      + (skipped.length ? ` Skipped ${skipped.join(', ')}: an item with that name exists.` : '');
-    await afterChange(message);
+    await afterChange(`Uploaded ${files(done)}.${skips()}`);
   } catch (error) {
-    fail(error);
+    // Show what did get written.
+    state.expanded.add(folder);
+    await afterChange(`Uploaded ${files(done)}, then stopped: ${error.message}${skips()}`).catch(() => {});
+    els.status.className = 'status error';
   }
 }

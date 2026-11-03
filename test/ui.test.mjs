@@ -610,8 +610,8 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.waitForFunction(() => document.querySelector('.row[data-path="p/c"]').classList.contains('drop-refused'));
       assert.notEqual(await r('p/c').evaluate((el) => getComputedStyle(el).outlineStyle), 'none');
       await p.mouse.up();
+      await p.waitForFunction(() => document.getElementById('status').textContent === 'A folder cannot be moved into itself.');
       assert.deepEqual(await opfsFiles(p), ['p/', 'p/c/', 'p/q/']);
-      assert.doesNotMatch(await p.locator('#status').textContent(), /Moved/);
       await p.context().close();
     });
 
@@ -666,6 +666,129 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       });
       await p.waitForFunction(() => /Uploaded 2 files/.test(document.getElementById('status').textContent));
       assert.deepEqual(await opfsFiles(p), ['top/', 'top/a.txt', 'top/empty/', 'top/inner/', 'top/inner/b.txt']);
+      await p.context().close();
+    });
+
+    it('dragging a file onto its own folder says it is already there', async () => {
+      const p = await freshPage(['a.txt'], 'y');
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('y').click();
+      await p.keyboard.press('ArrowRight');
+      await r('y/a.txt').hover();
+      await p.mouse.down();
+      await r('y').hover();
+      await r('y').hover({ position: { x: 20, y: 5 } });
+      await p.mouse.up();
+      await p.waitForFunction(() => document.getElementById('status').textContent === 'It is already in that folder.');
+      assert.deepEqual(await opfsFiles(p), ['y/', 'y/a.txt']);
+      await p.context().close();
+    });
+
+    it('an upload that stops part way shows what was written', async () => {
+      const p = await freshPage([]);
+      await p.reload();
+      await p.locator('.row[data-path=""]').click();
+      await p.evaluate(() => {
+        const file = (name) => ({ name, isFile: true, file: (ok) => ok(new File([name], name)) });
+        const bad = { name: 'bad.txt', isFile: true, file: (ok, no) => no(new Error('Could not read bad.txt.')) };
+        const children = [file('a.txt'), bad];
+        const top = { name: 'top', isDirectory: true, createReader: () => { let left = children; return { readEntries: (ok) => { ok(left); left = []; } }; } };
+        const event = new Event('drop', { bubbles: true, cancelable: true });
+        Object.defineProperty(event, 'dataTransfer', { value: { types: ['Files'], files: [], items: [{ kind: 'file', webkitGetAsEntry: () => top }] } });
+        document.getElementById('tree').dispatchEvent(event);
+      });
+      await p.waitForFunction(() => /Uploaded 1 file, then stopped: Could not read bad\.txt\./.test(document.getElementById('status').textContent));
+      assert.match(await p.getAttribute('#status', 'class'), /error/);
+      await p.locator('.row[data-path="top"]').waitFor();
+      assert.deepEqual(await opfsFiles(p), ['top/', 'top/a.txt']);
+      await p.context().close();
+    });
+
+    it('without write support, drops and moves are refused with a message', async () => {
+      const p = await (await browser.newContext()).newPage();
+      // The harness answers "areas" with canWrite false.
+      await p.addInitScript(() => {
+        let real;
+        Object.defineProperty(window, 'opfsTransport', {
+          get: () => real && {
+            call: async (op, args) => {
+              const reply = await real.call(op, args);
+              return op === 'areas' ? { ...reply, value: { ...reply.value, canWrite: false } } : reply;
+            },
+          },
+          set: (value) => { real = value; },
+        });
+      });
+      await p.goto(`${origin}/panel.html?harness`);
+      await p.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        await root.getFileHandle('a.txt', { create: true });
+        await root.getDirectoryHandle('y', { create: true });
+      });
+      await p.click('#refresh');
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('a.txt').click();
+      assert.equal(await p.locator('#move').isDisabled(), true);
+      await r('a.txt').hover();
+      await p.mouse.down();
+      await r('y').hover();
+      await r('y').hover({ position: { x: 20, y: 5 } });
+      await p.mouse.up();
+      await p.waitForFunction(() => document.getElementById('status').textContent === 'This browser cannot change files from a page.');
+      await p.evaluate(() => { document.getElementById('status').textContent = ''; });
+      await p.evaluate(() => {
+        const dt = new DataTransfer();
+        dt.items.add(new File(['1'], 'one.txt'));
+        const row = document.querySelector('.row[data-path="y"]');
+        for (const type of ['dragenter', 'dragover', 'drop']) row.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+      });
+      await p.waitForFunction(() => document.getElementById('status').textContent === 'This browser cannot change files from a page.');
+      assert.deepEqual(await opfsFiles(p), ['a.txt', 'y/']);
+      await p.context().close();
+    });
+
+    it('Alt+M moves the selected files to a typed folder', async () => {
+      const p = await freshPage(['a.txt', 'b.txt', 'c.txt', 'y/']);
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('a.txt').click();
+      await r('b.txt').click({ modifiers: ['ControlOrMeta'] });
+      await p.keyboard.press('Alt+m');
+      await p.locator('#card-body form input').fill('/y/');
+      await p.locator('#card-body form button[type=submit]').click();
+      await p.waitForFunction(() => /Moved 2 items/.test(document.getElementById('status').textContent));
+      assert.deepEqual(await opfsFiles(p), ['c.txt', 'y/', 'y/a.txt', 'y/b.txt']);
+      await p.context().close();
+    });
+
+    it('Move to refuses a folder into its own child', async () => {
+      const p = await freshPage(['c/'], 'p');
+      await p.reload();
+      await p.locator('.row[data-path="p"]').click();
+      await p.keyboard.press('Alt+m');
+      await p.locator('#card-body form input').fill('p/c');
+      await p.locator('#card-body form button[type=submit]').click();
+      await p.waitForFunction(() => document.getElementById('status').textContent === 'A folder cannot be moved into itself.');
+      assert.deepEqual(await opfsFiles(p), ['p/', 'p/c/']);
+      await p.context().close();
+    });
+
+    it('an answered prompt never drops unsaved edits, and only one prompt is open', async () => {
+      const p = await freshPage(['a.txt', 'b.txt']);
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('a.txt').click();
+      await p.click('#delete');
+      await p.click('#delete');
+      assert.equal(await p.locator('#card-body .prompt').count(), 1);
+      await r('b.txt').click();
+      await p.locator('#card-head', { hasText: 'b.txt' }).waitFor();
+      await p.locator('textarea.editor').fill('keep me');
+      await p.locator('#card-body button.danger', { hasText: 'Delete' }).click();
+      assert.match(await p.locator('#status').textContent(), /Save or discard/);
+      assert.equal(await p.locator('textarea.editor').inputValue(), 'keep me');
+      assert.deepEqual(await opfsFiles(p), ['a.txt', 'b.txt']);
       await p.context().close();
     });
 

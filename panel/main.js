@@ -3,7 +3,7 @@ import { onNavigated } from './transport.js';
 import { applyTheme } from './theme.js';
 import { els, state, setStatus, selectOnly } from './state.js';
 import { refresh, updateButtons, focusedItem, selectAll, select, toggle } from './tree.js';
-import { create, rename, remove, download, upload, duplicate, targets } from './actions.js';
+import { create, rename, remove, download, upload, duplicate, targets, moveAsk } from './actions.js';
 import { register, bindToolbar } from './commands.js';
 import { openHelp } from './menu.js';
 import { parentOf } from './format.js';
@@ -71,6 +71,10 @@ register({ id: 'rename', label: 'Rename', tip: 'Rename the selected item', keys:
 register({
   id: 'duplicate', label: 'Duplicate', tip: 'Copy the selected items into the same folder', keys: 'Mod+D', menu: true,
   when: () => hasItem() && state.canWrite, run: duplicate,
+});
+register({
+  id: 'move', label: 'Move to…', tip: 'Move the selected items to another folder', keys: 'Alt+M', toolbar: true, menu: true,
+  when: () => hasItem() && state.canWrite, run: moveAsk,
 });
 register({
   id: 'download', label: 'Download', tip: 'Download the selected file, or a zip of anything else', keys: 'Mod+S', scope: '!editor', swallow: true, toolbar: true, menu: true,
