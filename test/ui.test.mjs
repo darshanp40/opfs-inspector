@@ -645,6 +645,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.context().close();
     });
 
+    // On macOS Option+Shift+N types a character, so it must reach text fields.
     it('Mod+Shift+Z in the editor discards edits', async () => {
       const p = await freshPage(['a.txt']);
       await p.reload();
@@ -748,12 +749,14 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
     });
 
     // A worker writes files in place through sync access handles, as SQLite
-    // does. Chromium keeps their size and lastModified the same. before and
-    // after map file names to base64. With firstPage, page 1 of app.db and a
-    // hot -journal are written before the copy starts. The rest is written
-    // after the panel reads the first 512 KB part of app.db, or, with
-    // firstPage, first looks at the -journal file.
-    async function tornCopy({ before, after, firstPage = false, first }) {
+    // does. Chromium keeps their size and lastModified the same.
+    // before: files at the start. after: what the worker writes later, at
+    //   byte `from`; a name not in before is created, null deletes it.
+    // firstPage: page 1 of app.db and a hot -journal are written at the start.
+    // trigger: when the rest is written. 'part' after the panel reads the
+    //   first 512 KB part of app.db, 'wal-stat' after it first looks for the
+    //   -wal file, 'never' leaves it to the test (window.writeRest()).
+    async function tornCopy({ before, after, from = 0, firstPage = false, trigger = 'part', first, error }) {
       const p = await freshPage([]);
       await p.evaluate(async (files) => {
         const root = await navigator.storage.getDirectory();
@@ -764,13 +767,12 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
         }
       }, before);
       await p.reload();
-      await p.evaluate(({ after, firstPage }) => new Promise((resolve, reject) => {
+      await p.evaluate(({ after, from, firstPage, existing }) => new Promise((resolve, reject) => {
         const code = `onmessage = async ({ data }) => {
           const root = await navigator.storage.getDirectory();
           if (data.files) {
-            self.files = data.files;
-            self.handles = {};
-            for (const name of Object.keys(data.files)) self.handles[name] = await (await root.getFileHandle(name)).createSyncAccessHandle();
+            Object.assign(self, { files: data.files, from: data.from, handles: {} });
+            for (const name of data.existing) self.handles[name] = await (await root.getFileHandle(name)).createSyncAccessHandle();
             if (data.firstPage) {
               self.handles['app.db'].write(self.files['app.db'].subarray(0, 4096), { at: 0 });
               self.handles['app.db'].flush();
@@ -780,8 +782,14 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
             }
           } else {
             for (const [name, bytes] of Object.entries(self.files)) {
-              self.handles[name].write(bytes, { at: 0 });
-              self.handles[name].flush();
+              if (bytes === null) {
+                self.handles[name].close();
+                await root.removeEntry(name);
+                continue;
+              }
+              const h = self.handles[name] || (self.handles[name] = await (await root.getFileHandle(name, { create: true })).createSyncAccessHandle());
+              h.write(bytes.subarray(self.from), { at: self.from });
+              h.flush();
             }
             if (self.journal) {
               self.journal.close();
@@ -797,25 +805,32 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
           writer.postMessage({});
         });
         writer.onmessage = () => resolve();
-        const files = Object.fromEntries(Object.entries(after).map(([name, b64]) => [name, Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))]));
-        writer.postMessage({ files, firstPage });
-      }), { after, firstPage });
-      await p.evaluate((firstPage) => {
+        const files = Object.fromEntries(Object.entries(after).map(([name, b64]) => [name, b64 === null ? null : Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))]));
+        writer.postMessage({ files, from, firstPage, existing });
+      }), { after, from, firstPage, existing: Object.keys(before) });
+      await p.evaluate((trigger) => {
         const t = window.opfsTransport;
         const call = t.call;
         let pending = true;
         t.call = async (op, args) => {
           const reply = await call(op, args);
-          const firstPart = op === 'read' && args.path === 'app.db' && args.length === 512 * 1024;
-          if (pending && (firstPart || (firstPage && String(args && args.path).endsWith('-journal')))) {
+          const hit = {
+            part: op === 'read' && args.path === 'app.db' && args.length === 512 * 1024,
+            'wal-stat': op === 'stat' && args.path === 'app.db-wal',
+          }[trigger];
+          if (pending && hit) {
             pending = false;
             await window.writeRest();
           }
           return reply;
         };
-      }, firstPage);
+      }, trigger);
       await p.locator('.row[data-path="app.db"]').click();
       await p.locator('.grid tbody tr, .sql-view .note.error, .snap .note.error').first().waitFor();
+      if (error) {
+        assert.match(await p.locator('.snap .note').textContent(), error);
+        return p;
+      }
       assert.deepEqual(await p.locator('.note.error').allTextContents(), []);
       assert.match(await p.locator('.grid tbody tr:first-child td:nth-child(2)').textContent(), first);
       await p.context().close();
@@ -825,15 +840,39 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       before: { 'app.db': bigOld }, after: { 'app.db': bigNew }, first: /^new /,
     }));
 
-    it('a database part-way through a commit is copied again', () => tornCopy({
-      before: { 'app.db': bigOld }, after: { 'app.db': bigNew }, firstPage: true, first: /^new /,
+    // With locking_mode=exclusive the change counter stays the same and the
+    // -journal is zeroed after each commit, so only the pages differ.
+    it('a commit that leaves page 1 alone during the copy is copied again', () => tornCopy({
+      before: { 'app.db': bigOld }, after: { 'app.db': bigNew }, from: 4096, first: /^new /,
     }));
+
+    // Both reads of the copy agree, but the commit is not done.
+    it('a database part-way through a commit is not opened until it is done', async () => {
+      const p = await tornCopy({
+        before: { 'app.db': bigOld }, after: { 'app.db': bigNew }, firstPage: true, trigger: 'never', error: /kept changing/,
+      });
+      await p.evaluate(() => window.writeRest());
+      await p.getByRole('button', { name: 'Reload snapshot' }).click();
+      await p.locator('.grid tbody tr:first-child td:nth-child(2)', { hasText: /^new / }).waitFor();
+      await p.context().close();
+    });
 
     // A checkpoint copies "mid" into the database during the copy, then the
     // -wal file starts again, so it no longer holds the pages to repair.
     it('a -wal file that starts again during the copy is copied again', () => tornCopy({
       before: { 'app.db': walMid.db, 'app.db-wal': walMid.wal },
       after: { 'app.db': walRestarted.db, 'app.db-wal': walRestarted.wal },
+      first: /^mid /,
+    }));
+
+    it('a -wal file that appears during the copy is copied too', () => tornCopy({
+      before: { 'app.db': walMid.db }, after: { 'app.db-wal': walMid.wal }, trigger: 'wal-stat', first: /^mid /,
+    }));
+
+    // As when the site closes the database: a checkpoint, then the -wal file goes.
+    it('a -wal file deleted during the copy is copied again', () => tornCopy({
+      before: { 'app.db': walMid.db, 'app.db-wal': walMid.wal },
+      after: { 'app.db': walRestarted.db, 'app.db-wal': null },
       first: /^mid /,
     }));
 
