@@ -12,6 +12,10 @@ import { join } from 'node:path';
 let server;
 let origin;
 let dbBase64; // a database with table t (250 rows) and view v
+let bigOld; // a 1 MB database whose names start with "old"
+let bigNew; // the same database after a commit renamed every row to "new"
+let walMid; // WAL mode: {db, wal} with every row renamed to "mid" in the -wal file
+let walRestarted; // after a checkpoint and a new -wal file that renames the last row
 before(async () => ({ server, origin } = await startServer()));
 before(async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ui-db-'));
@@ -23,6 +27,31 @@ before(async () => {
   for (let i = 2; i <= 250; i++) insert.run(`row ${i}`, i / 2, null);
   db.close();
   dbBase64 = (await readDisk(file)).toString('base64');
+  const big = new DatabaseSync(join(dir, 'big.db'));
+  big.exec('create table t (id integer primary key, name text)');
+  const add = big.prepare('insert into t (name) values (?)');
+  for (let i = 0; i < 3000; i++) add.run(`old ${'x'.repeat(300)}`);
+  bigOld = (await readDisk(join(dir, 'big.db'))).toString('base64');
+  big.exec(`update t set name = 'new ' || substr(name, 5)`);
+  big.close();
+  bigNew = (await readDisk(join(dir, 'big.db'))).toString('base64');
+  assert.equal(bigOld.length, bigNew.length);
+  // Files are read while the connection is open, so the -wal file stays.
+  const walFile = join(dir, 'wal.db');
+  const w = new DatabaseSync(walFile);
+  w.exec('pragma journal_mode = wal; pragma wal_autocheckpoint = 0; create table t (id integer primary key, name text)');
+  const put = w.prepare('insert into t (name) values (?)');
+  for (let i = 0; i < 3000; i++) put.run(`old ${'x'.repeat(300)}`);
+  w.exec('pragma wal_checkpoint(truncate)');
+  w.exec(`update t set name = 'mid ' || substr(name, 5)`);
+  const files = async () => ({ db: (await readDisk(walFile)).toString('base64'), wal: (await readDisk(`${walFile}-wal`)).toString('base64') });
+  walMid = await files();
+  w.exec('pragma wal_checkpoint(passive)');
+  // The next commit starts the -wal file again, in place, with new salts.
+  w.exec(`update t set name = 'new ' || substr(name, 5) where id = 3000`);
+  walRestarted = await files();
+  w.close();
+  assert.equal(walMid.wal.length, walRestarted.wal.length);
   await rm(dir, { recursive: true });
 });
 after(() => {
@@ -687,6 +716,96 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.locator('.snap .note.error', { hasText: 'kept changing' }).waitFor();
       await p.context().close();
     });
+
+    // A worker writes files in place through sync access handles, as SQLite
+    // does. Chromium keeps their size and lastModified the same. before and
+    // after map file names to base64. With firstPage, page 1 of app.db and a
+    // hot -journal are written before the copy starts. The rest is written
+    // after the panel reads the first 512 KB part of app.db, or, with
+    // firstPage, first looks at the -journal file.
+    async function tornCopy({ before, after, firstPage = false, first }) {
+      const p = await freshPage([]);
+      await p.evaluate(async (files) => {
+        const root = await navigator.storage.getDirectory();
+        for (const [name, b64] of Object.entries(files)) {
+          const w = await (await root.getFileHandle(name, { create: true })).createWritable();
+          await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+          await w.close();
+        }
+      }, before);
+      await p.reload();
+      await p.evaluate(({ after, firstPage }) => new Promise((resolve, reject) => {
+        const code = `onmessage = async ({ data }) => {
+          const root = await navigator.storage.getDirectory();
+          if (data.files) {
+            self.files = data.files;
+            self.handles = {};
+            for (const name of Object.keys(data.files)) self.handles[name] = await (await root.getFileHandle(name)).createSyncAccessHandle();
+            if (data.firstPage) {
+              self.handles['app.db'].write(self.files['app.db'].subarray(0, 4096), { at: 0 });
+              self.handles['app.db'].flush();
+              self.journal = await (await root.getFileHandle('app.db-journal', { create: true })).createSyncAccessHandle();
+              self.journal.write(new Uint8Array([0xd9, 0xd5, 0x05, 0xf9, 0x20, 0xa1, 0x63, 0xd7, 0, 0, 0, 1]), { at: 0 });
+              self.journal.flush();
+            }
+          } else {
+            for (const [name, bytes] of Object.entries(self.files)) {
+              self.handles[name].write(bytes, { at: 0 });
+              self.handles[name].flush();
+            }
+            if (self.journal) {
+              self.journal.close();
+              await root.removeEntry('app.db-journal');
+            }
+          }
+          postMessage('done');
+        };`;
+        const writer = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+        writer.onerror = (e) => reject(new Error(e.message));
+        window.writeRest = () => new Promise((done) => {
+          writer.onmessage = () => done();
+          writer.postMessage({});
+        });
+        writer.onmessage = () => resolve();
+        const files = Object.fromEntries(Object.entries(after).map(([name, b64]) => [name, Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))]));
+        writer.postMessage({ files, firstPage });
+      }), { after, firstPage });
+      await p.evaluate((firstPage) => {
+        const t = window.opfsTransport;
+        const call = t.call;
+        let pending = true;
+        t.call = async (op, args) => {
+          const reply = await call(op, args);
+          const firstPart = op === 'read' && args.path === 'app.db' && args.length === 512 * 1024;
+          if (pending && (firstPart || (firstPage && String(args && args.path).endsWith('-journal')))) {
+            pending = false;
+            await window.writeRest();
+          }
+          return reply;
+        };
+      }, firstPage);
+      await p.locator('.row[data-path="app.db"]').click();
+      await p.locator('.grid tbody tr, .sql-view .note.error, .snap .note.error').first().waitFor();
+      assert.deepEqual(await p.locator('.note.error').allTextContents(), []);
+      assert.match(await p.locator('.grid tbody tr:first-child td:nth-child(2)').textContent(), first);
+      await p.context().close();
+    }
+
+    it('a database rewritten in place during the copy is copied again', () => tornCopy({
+      before: { 'app.db': bigOld }, after: { 'app.db': bigNew }, first: /^new /,
+    }));
+
+    it('a database part-way through a commit is copied again', () => tornCopy({
+      before: { 'app.db': bigOld }, after: { 'app.db': bigNew }, firstPage: true, first: /^new /,
+    }));
+
+    // A checkpoint copies "mid" into the database during the copy, then the
+    // -wal file starts again, so it no longer holds the pages to repair.
+    it('a -wal file that starts again during the copy is copied again', () => tornCopy({
+      before: { 'app.db': walMid.db, 'app.db-wal': walMid.wal },
+      after: { 'app.db': walRestarted.db, 'app.db-wal': walRestarted.wal },
+      first: /^mid /,
+    }));
 
     it('sqlite bundle and wasm load only on first open', async () => {
       const p = await freshPage(['a.txt']);
