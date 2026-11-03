@@ -47,7 +47,7 @@ Everything below is in scope for 0.2.0.
     - It reads a snapshot. The panel copies the file's bytes, and the `-wal` file next to it when one exists, then opens the copy in SQLite in the panel. The live file is never opened by the viewer, so the app's own database cannot be damaged. The card says when the snapshot was taken and has a "Reload snapshot" button.
     - Reading works while the app has the database open. Checked on 2026-11-03: with a worker holding a sync access handle in `readwrite` or `readwrite-unsafe` mode, `getFile()` still returned the current bytes, in Chromium 141 and Firefox 142. Only writes are refused while a file is held.
     - A file that changes during the copy gives a torn snapshot. The builder detects this (for example, size and modified time before and after) and retries a few times.
-    - *Builder's call:* SQLite's in-memory loading does not replay a `-wal` file. So the copy is written to a temporary folder in the extension's own OPFS, opened there in a worker in the panel, and deleted when the card closes. Leftovers are swept when the panel opens. The data never leaves the device, but `PRIVACY.md` is reworded so it no longer says the extension has no storage of its own.
+    - *Builder's call:* SQLite's in-memory loading does not replay a `-wal` file. So the panel replays it itself: it copies the committed pages from the `-wal` file into the copied database bytes, following the WAL file format (salts and checksums, stopping at the last valid commit). It then marks the copy as not using WAL and opens it in memory, in a worker in the panel. Nothing is written to disk, and `PRIVACY.md` keeps saying the extension has no storage of its own.
     - *Builder's call:* 0.2.0 reads plain database files, meaning files that start with the SQLite header. Pool layouts (`opfs-sahpool`, wa-sqlite's AccessHandlePoolVFS) and databases kept in IndexedDB are not read. The README says so, and the card explains it when a file looks like a pool file.
     - Databases written by VFSs that keep extra files (for example wa-sqlite's write-ahead files) may show slightly old data. The card says so when it finds files like these next to the database.
 
@@ -96,7 +96,7 @@ Everything below is in scope for 0.2.0.
 - **A build step** (esbuild) bundles the panel and its libraries. Source stays readable. The zip contains the built files. `src/ops.js` and `src/agent.js` stay hand-written, with no build step, so the page part stays small and easy to review.
 - **Libraries**:
   - CodeMirror 6 for the editor.
-  - The official SQLite WebAssembly build (`@sqlite.org/sqlite-wasm`) for the viewer.
+  - sql.js (SQLite compiled to WebAssembly, MIT) for the viewer.
   - A small Markdown parser plus DOMPurify.
   - fflate for zips.
   - The builder may swap any of these for something smaller that meets the same need.
