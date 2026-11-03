@@ -29,6 +29,9 @@ await page.evaluate(async () => {
   await put(root, 'cache/thumb-01.bin', new Uint8Array(20480));
   await put(root, 'cache/thumb-02.bin', new Uint8Array(18432));
   await put(root, 'readme.txt', 'Files for the demo site.\n');
+  for (const name of ['media-cache', 'offline-db']) {
+    await put(await (await navigator.storageBuckets.open(name)).getDirectory(), 'placeholder.txt', 'x');
+  }
   const bucket = await navigator.storageBuckets.open('drafts');
   await put(await bucket.getDirectory(), 'drafts.db', sqlite(262144));
   await put(await bucket.getDirectory(), 'drafts.db-wal', new Uint8Array(32768));
@@ -50,6 +53,20 @@ await page.selectOption('#area', 'bucket:drafts');
 await row('drafts.db').click();
 await page.locator('pre.hex').waitFor();
 await page.screenshot({ path: 'docs/bucket.png' });
+
+// A native dropdown does not show in screenshots, so draw the open list.
+await page.evaluate(() => {
+  const select = document.getElementById('area');
+  const list = select.cloneNode(true);
+  const box = select.getBoundingClientRect();
+  list.size = list.options.length;
+  list.value = select.value;
+  Object.assign(list.style, { position: 'fixed', left: `${box.left}px`, top: `${box.bottom + 2}px`, minWidth: `${box.width}px`, zIndex: 10, boxShadow: '0 4px 12px rgb(0 0 0 / .2)', padding: '2px' });
+  document.body.append(list);
+  list.focus();
+});
+await page.screenshot({ path: 'docs/picker.png' });
+await page.evaluate(() => document.querySelector('body > select').remove());
 
 await page.emulateMedia({ colorScheme: 'dark' });
 await page.reload();

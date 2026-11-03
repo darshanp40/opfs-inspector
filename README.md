@@ -4,6 +4,8 @@ A developer tools panel for the [origin private file system](https://developer.m
 
 ![Editing a JSON file in the default storage](docs/editor.png)
 
+![Picking a Storage Bucket](docs/picker.png)
+
 ![A SQLite database inside a Storage Bucket](docs/bucket.png)
 
 ![The panel in dark mode](docs/dark.png)

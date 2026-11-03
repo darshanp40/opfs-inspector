@@ -43,7 +43,7 @@ Lets developers view and edit the origin private file system (OPFS) and Storage 
 
 **Images:**
 - Icon: `icons/icon-128.png`
-- Screenshots (1280×800): `docs/editor.png`, `docs/bucket.png`, `docs/dark.png`
+- Screenshots (1280×800): `docs/editor.png`, `docs/picker.png`, `docs/bucket.png`, `docs/dark.png`
 - Small promo tile (Chrome, 440×280): `store/promo-440x280.png`
 - Logo (Edge, 300×300): `store/logo-300x300.png`
 
