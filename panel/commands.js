@@ -18,7 +18,7 @@ const parse = (keys) => {
 // {id, label, tip, keys, when, run, scope, typing, swallow, toolbar, menu}
 // keys: one string, or an array (the first is the one shown).
 // when(state) -> boolean enables the command.
-// scope: 'tree', 'editor', 'preview' or '!editor' limits the keys to where focus is.
+// scope: 'tree', 'editor', 'preview', 'query' or '!editor' limits the keys to where focus is.
 // typing: the keys also work while a text field has focus.
 // swallow: the keys are taken even when the command is disabled.
 export function register(command) {
@@ -71,6 +71,7 @@ const inScope = (scope) => {
   if (scope === 'tree') return !!active && active.closest('#tree') !== null;
   if (scope === 'editor') return inEditor;
   if (scope === 'preview') return !!active && active.closest('.image-view') !== null;
+  if (scope === 'query') return !!active && active.closest('.query-editor') !== null;
   if (scope === '!editor') return !inEditor;
   return true;
 };

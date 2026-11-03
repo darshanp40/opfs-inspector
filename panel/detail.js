@@ -1,12 +1,13 @@
 // The card: the open item's header, tabs and views.
 import { call } from './transport.js';
 import { els, state, currentArea, setStatus, fail } from './state.js';
-import { baseName, formatSize, fromBase64, formatJson } from './format.js';
+import { baseName, parentOf, formatSize, fromBase64, formatJson } from './format.js';
 import { renderTree, reloadExpanded, showUsage } from './tree.js';
 import { iconFor, typeOf } from './icons.js';
 import { getSettings, onSettingsChange } from './settings.js';
 import { showImage, imageMime, IMAGE_LIMIT } from './image.js';
 import { download } from './actions.js';
+import { tableView, queryView, snapshotBar, closeSqlite } from './database.js';
 
 const TEXT_LIMIT = 2 * 1024 * 1024;
 const PREVIEW_BYTES = 4096;
@@ -88,6 +89,8 @@ const TYPE_LABELS = {
 export const TABS = {
   Preview: (item) => preview(item),
   Editor: (item) => editor(item.path, item.text),
+  Table: (item) => tableView(item),
+  Query: (item) => queryView(item),
   Bytes: (item) => {
     const pre = document.createElement('pre');
     pre.className = 'hex';
@@ -121,10 +124,26 @@ export const TABS = {
         ['Modified', modified(item)],
         ['Type', TYPE_LABELS[item.type]],
       ]));
+      const hint = fileHint(item);
+      if (hint) wrap.append(note(hint));
     }
     return wrap;
   },
 };
+
+// A word about SQLite files this viewer cannot read in full.
+function fileHint(item) {
+  const name = baseName(item.path);
+  const folder = parentOf(item.path);
+  const siblings = (state.children.get(folder) || []).map((e) => e.name);
+  if (item.type === 'sqlite') {
+    // -wal is read; other files next to it belong to the app's VFS.
+    const extra = siblings.some((n) => n.startsWith(`${name}-`) && !/^-(wal|shm|journal)$/.test(n.slice(name.length)));
+    return extra ? 'Other files next to this database may hold changes that are not in it yet, so the data shown may be slightly old.' : '';
+  }
+  const pool = baseName(folder) === '.opaque' || siblings.includes('.opaque') || /^[a-z0-9]{16}$/i.test(name);
+  return item.type === 'binary' && pool ? 'This looks like a SQLite pool file (opfs-sahpool or AccessHandlePoolVFS), which this viewer cannot read.' : '';
+}
 
 export function tabsFor(type) {
   // Preview has a renderer for images and Markdown.
@@ -254,6 +273,7 @@ function drawCard(item) {
     openImage.destroy();
     openImage = null;
   }
+  closeSqlite();
   // A calculation dropped by a redraw leaves no stale message.
   if (state.sizing) {
     state.sizing = false;
@@ -305,6 +325,8 @@ function drawCard(item) {
     tab.addEventListener('click', open);
     return { tab, panel, open };
   });
+  // A database's tabs share one snapshot, shown above them.
+  if (item.type === 'sqlite' && !item.error) els.cardBody.insertBefore(snapshotBar(item), tabs[0].panel);
   els.cardTabs.replaceChildren(...tabs.map((t) => t.tab));
   els.cardTabs.hidden = false;
   els.cardTabs.onkeydown = (event) => {

@@ -274,3 +274,20 @@ dialog form { align-self: flex-end; margin: 0; }
   .markdown :is(code, pre) { border: 1px solid CanvasText; background: Canvas; }
   .markdown :is(h1, th, td, blockquote, hr) { border-color: CanvasText; }
 }
+
+/* SQLite viewer. */
+.snap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.snap .note { margin-right: auto; }
+.sql-view { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.query-editor { flex: none; height: 140px; min-height: 0; }
+.grid-wrap { min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.grid { border-collapse: collapse; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; }
+.grid th, .grid td { padding: 3px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.grid td { max-width: 32em; overflow: hidden; text-overflow: ellipsis; }
+.grid th { position: sticky; top: 0; background: var(--surface-2); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-weight: 600; }
+.grid th .type { display: block; color: var(--muted); font-weight: normal; font-size: 11px; }
+.grid .muted { color: var(--muted); font-style: italic; }
+.sql-view select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+@media (forced-colors: active) {
+  .grid-wrap, .grid th, .grid td { border-color: CanvasText; }
+}

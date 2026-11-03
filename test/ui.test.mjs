@@ -4,10 +4,27 @@ import assert from 'node:assert/strict';
 import AxeBuilder from '@axe-core/playwright';
 import { startServer } from './server.mjs';
 import { engines } from './browsers.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdtemp, readFile as readDisk, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let server;
 let origin;
+let dbBase64; // a database with table t (250 rows) and view v
 before(async () => ({ server, origin } = await startServer()));
+before(async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ui-db-'));
+  const file = join(dir, 'app.db');
+  const db = new DatabaseSync(file);
+  db.exec('create table t (id integer primary key, name text, score real, data blob); create view v as select id from t where id <= 10');
+  const insert = db.prepare('insert into t (name, score, data) values (?, ?, ?)');
+  insert.run('<img src=x onerror="document.title=1">', 1.5, new Uint8Array([1, 2, 3]));
+  for (let i = 2; i <= 250; i++) insert.run(`row ${i}`, i / 2, null);
+  db.close();
+  dbBase64 = (await readDisk(file)).toString('base64');
+  await rm(dir, { recursive: true });
+});
 after(() => {
   server.closeAllConnections();
   server.close();
@@ -157,20 +174,54 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       assert.equal(await page.locator('.row svg').count(), rows);
     });
 
-    it('shows a SQLite file as a database with a byte preview', async () => {
-      await page.evaluate(async () => {
-        const root = await navigator.storage.getDirectory();
-        const file = await root.getFileHandle('app.db', { create: true });
-        const writable = await file.createWritable();
-        const bytes = new Uint8Array(8192);
-        bytes.set(new TextEncoder().encode('SQLite format 3\u0000'));
-        await writable.write(bytes);
-        await writable.close();
-      });
+    it('tables list and first page of rows', async () => {
+      await putDb(page);
       await page.click('#refresh');
       await row('app.db').click();
       await page.locator('.badge', { hasText: 'SQLite database' }).waitFor();
-      assert.match(await page.locator('pre.hex').textContent(), /SQLite format 3/);
+      assert.deepEqual(await page.locator('#card-tabs [role=tab]').allTextContents(), ['Table', 'Query', 'Details']);
+      await page.locator('.grid tbody tr').first().waitFor();
+      assert.deepEqual(await page.locator('.sql-view select option').allTextContents(), ['t', 'v (view)']);
+      assert.deepEqual(await page.locator('.grid th .type').allTextContents(), ['INTEGER', 'TEXT', 'REAL', 'BLOB']);
+      assert.equal(await page.locator('.grid tbody tr').count(), 100);
+      assert.match(await page.locator('.sql-view .count').textContent(), /Rows 1–100 of 250/);
+      // Site values are text, never markup.
+      const first = await page.locator('.grid tbody tr').first().locator('td').allTextContents();
+      assert.deepEqual(first.slice(0, 3), ['1', '<img src=x onerror="document.title=1">', '1.5']);
+      assert.match(first[3], /^BLOB, 3/);
+      assert.equal(await page.locator('#card-body img').count(), 0);
+      assert.match(await page.locator('.snap').textContent(), /Snapshot taken/);
+    });
+
+    it('Next shows rows 101 to 200', async () => {
+      await page.getByRole('button', { name: 'Next' }).click();
+      await page.locator('.sql-view .count', { hasText: 'Rows 101–200 of 250' }).waitFor();
+      assert.equal(await page.locator('.grid tbody tr').first().locator('td').first().textContent(), '101');
+      assert.equal(await page.getByRole('button', { name: 'Previous' }).isDisabled(), false);
+    });
+
+    it('query select works, and a write is refused', async () => {
+      const run = async (sql) => {
+        await page.locator('.query-editor .cm-content').fill(sql);
+        await page.locator('.query-editor .cm-content').press('ControlOrMeta+Enter');
+        await page.locator('.sql-result').filter({ hasNotText: 'Running' }).waitFor();
+      };
+      const result = () => page.locator('.sql-result').textContent();
+      await page.getByRole('tab', { name: 'Query' }).click();
+      await page.locator('.query-editor .cm-content').waitFor();
+      await run('select count(*) from t');
+      await page.locator('.sql-result .grid td', { hasText: '250' }).waitFor();
+      await run('delete from t');
+      await page.locator('.sql-result .note.error').waitFor();
+      assert.match(await result(), /readonly|query_only/);
+      await run('select 1; select 2');
+      await page.locator('.sql-result .note.error', { hasText: 'Run one statement at a time.' }).waitFor();
+      await page.getByRole('button', { name: 'Reload snapshot' }).click();
+      await page.locator('.snap', { hasText: 'Snapshot taken' }).waitFor();
+      await run('select count(*) from t');
+      await page.locator('.sql-result .grid td', { hasText: '250' }).waitFor();
+      await page.getByRole('tab', { name: 'Table' }).click();
+      await page.locator('.sql-view .count', { hasText: /of 250/ }).waitFor();
     });
 
     it('deletes a folder after asking', async () => {
@@ -212,6 +263,13 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       }, { names, folder });
       return p;
     }
+    // Writes the fixture database into the root of a page's OPFS.
+    const putDb = (p, name = 'app.db') => p.evaluate(async ({ name, b64 }) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const writable = await (await (await navigator.storage.getDirectory()).getFileHandle(name, { create: true })).createWritable();
+      await writable.write(bytes);
+      await writable.close();
+    }, { name, b64: dbBase64 });
     const manyNames = (n) => Array.from({ length: n }, (_, i) => `f${String(i).padStart(5, '0')}.txt`);
     const focused = (p) => p.evaluate(() => document.activeElement.dataset.path);
 
@@ -586,6 +644,63 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.locator('.row[data-path="a.txt"]').click();
       await p.locator('.cm-editor').waitFor();
       assert.equal(await p.locator('[data-cmd="format-json"]').count(), 0);
+      await p.context().close();
+    });
+
+    it('a held database still opens', async () => {
+      const p = await freshPage([]);
+      await putDb(p);
+      // A worker in the page holds the file, as an app using SQLite would.
+      await p.evaluate(() => new Promise((resolve, reject) => {
+        const code = `onmessage = async () => {
+          const file = await (await navigator.storage.getDirectory()).getFileHandle('app.db');
+          self.handle = await file.createSyncAccessHandle();
+          postMessage('held');
+        };`;
+        window.holder = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+        window.holder.onmessage = () => resolve();
+        window.holder.onerror = (e) => reject(new Error(e.message));
+        window.holder.postMessage(0);
+      }));
+      await p.click('#refresh');
+      await p.locator('.row[data-path="app.db"]').click();
+      await p.locator('.sql-view .count', { hasText: 'Rows 1–100 of 250' }).waitFor();
+      await p.context().close();
+    });
+
+    it('a database that changes during copy', async () => {
+      const p = await freshPage([]);
+      await putDb(p);
+      await p.reload();
+      // After the card's first read, every read says the file changed.
+      await p.evaluate(() => {
+        const t = window.opfsTransport;
+        const call = t.call;
+        let n = 0;
+        t.call = async (op, args) => {
+          const reply = await call(op, args);
+          if (op === 'read' && args.path === 'app.db' && reply.ok && n++ > 0) reply.value.lastModified += n;
+          return reply;
+        };
+      });
+      await p.locator('.row[data-path="app.db"]').click();
+      await p.locator('.snap .note.error', { hasText: 'kept changing' }).waitFor();
+      await p.context().close();
+    });
+
+    it('sqlite bundle and wasm load only on first open', async () => {
+      const p = await freshPage(['a.txt']);
+      await putDb(p);
+      const requests = [];
+      p.on('request', (req) => requests.push(req.url()));
+      await p.reload();
+      await p.locator('.row[data-path="a.txt"]').click();
+      await p.locator('.cm-editor').waitFor();
+      assert.deepEqual(requests.filter((u) => /sqlite|sql-wasm/.test(u)), []);
+      await p.locator('.row[data-path="app.db"]').click();
+      await p.locator('.grid tbody tr').first().waitFor();
+      assert.ok(requests.some((u) => /\/build\/sqlite\.js$/.test(u)), 'worker bundle');
+      assert.ok(requests.some((u) => /\/build\/sql-wasm\.wasm$/.test(u)), 'wasm');
       await p.context().close();
     });
 
@@ -1287,6 +1402,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
           await page.locator('#card-tabs [role=tab]').first().waitFor();
           if (path === 'readme.md') await page.locator('#card-body .markdown h1').waitFor();
           if (path === 'three.png') await page.waitForFunction(() => document.querySelector('.image-port img')?.naturalWidth === 3);
+          if (path === 'app.db') await page.locator('.grid tbody tr').first().waitFor();
           await page.waitForFunction(() => /of|not available/.test(document.getElementById('usage').textContent));
           const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
           const bad = violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
@@ -1297,6 +1413,11 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
           const bad = violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
           assert.deepEqual(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(' ')}`), [], `${JSON.stringify(media)} ${name}`);
         };
+        await row('app.db').click();
+        await page.getByRole('tab', { name: 'Query' }).click();
+        await page.locator('.query-editor .cm-content').press('ControlOrMeta+Enter');
+        await page.locator('.sql-result .grid').waitFor();
+        await scan('sqlite query');
         await row('readme.md').click({ button: 'right' });
         await page.locator('[role=menu]').waitFor();
         await scan('context menu');

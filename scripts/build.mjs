@@ -6,12 +6,23 @@ import { existsSync } from 'node:fs';
 await rm('build', { recursive: true, force: true });
 await mkdir('build');
 
-const entries = (await readdir('panel')).filter((f) => f === 'main.js' || f.endsWith('.entry.js'));
+// The SQLite worker is a bundle of its own, so it shares no chunk with the panel.
+const WORKER = 'sqlite.entry.js';
+const entries = (await readdir('panel')).filter((f) => f === 'main.js' || (f.endsWith('.entry.js') && f !== WORKER));
 const result = await build({
   entryPoints: Object.fromEntries(entries.map((f) => [f === 'main.js' ? 'panel' : f.replace(/\.entry\.js$/, ''), `panel/${f}`])),
   outdir: 'build',
   bundle: true,
   splitting: true,
+  format: 'esm',
+  target: 'es2022',
+  metafile: true,
+  logLevel: 'warning',
+});
+const worker = await build({
+  entryPoints: { sqlite: `panel/${WORKER}` },
+  outdir: 'build',
+  bundle: true,
   format: 'esm',
   target: 'es2022',
   metafile: true,
@@ -23,7 +34,7 @@ if (existsSync(wasm)) await copyFile(wasm, 'build/sql-wasm.wasm');
 
 // One licence entry for each bundled package under node_modules.
 const packages = new Set();
-for (const file of Object.keys(result.metafile.inputs)) {
+for (const file of [...Object.keys(result.metafile.inputs), ...Object.keys(worker.metafile.inputs)]) {
   const m = file.match(/^node_modules\/((?:@[^/]+\/)?[^/]+)\//);
   if (m) packages.add(m[1]);
 }
