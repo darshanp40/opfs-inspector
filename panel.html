@@ -54,6 +54,16 @@
     <span id="usage" class="usage"></span>
     <meter id="usage-meter" min="0" max="1" value="0" aria-label="Storage used"></meter>
   </footer>
+  <dialog id="help" aria-labelledby="help-title">
+    <h2 id="help-title">Keyboard shortcuts</h2>
+    <div class="help-scroll" role="region" aria-label="Shortcut list" tabindex="0">
+      <table>
+        <thead><tr><th scope="col">Command</th><th scope="col">Keys</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <form method="dialog"><button class="primary">Close</button></form>
+  </dialog>
   <script type="module" src="build/panel.js"></script>
 </body>
 </html>

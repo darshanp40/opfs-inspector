@@ -4,6 +4,8 @@ import { els, state, currentArea, setStatus, fail, selectOnly, selectionChanged 
 import { join, parentOf, baseName, formatSize } from './format.js';
 import { showDetail } from './detail.js';
 import { iconFor } from './icons.js';
+import { commandsFor, syncToolbar } from './commands.js';
+import { openMenu } from './menu.js';
 
 async function loadAreas() {
   const info = await call('areas');
@@ -258,6 +260,14 @@ els.tree.addEventListener('click', (event) => {
   else select(item.path, item.kind);
 });
 
+els.tree.addEventListener('contextmenu', async (event) => {
+  const item = itemAt(event.target);
+  if (!item) return;
+  event.preventDefault();
+  if (!state.selection.has(item.path)) await select(item.path, item.kind);
+  openMenu(event.clientX, event.clientY, commandsFor('menu'));
+});
+
 els.tree.addEventListener('dblclick', (event) => {
   const item = itemAt(event.target);
   if (item && item.kind === 'directory' && !event.target.closest('.twisty')) toggle(item.path);
@@ -304,6 +314,9 @@ els.tree.addEventListener('keydown', (event) => {
   if (event.shiftKey && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) selectRange(to);
   else moveFocus(to.path);
 });
+
+// The item that has the tree's focus.
+export const focusedItem = () => items().find((r) => r.path === state.focus);
 
 function moveFocus(path) {
   state.focus = path;
@@ -404,18 +417,9 @@ function selectRange(item) {
 }
 
 // Every shown item except the root, which setSelection leaves out.
-function selectAll() {
+export function selectAll() {
   if (blocked(null)) return;
   setSelection(items().map((r) => r.path), null);
 }
 
-export function updateButtons() {
-  const sel = state.selected;
-  const writable = state.canWrite;
-  els.newFile.disabled = false;
-  els.newFolder.disabled = false;
-  els.upload.disabled = !writable;
-  els.rename.disabled = !sel || sel.path === '';
-  els.download.disabled = !sel || sel.kind !== 'file';
-  els.remove.disabled = !sel || sel.path === '';
-}
+export const updateButtons = syncToolbar;

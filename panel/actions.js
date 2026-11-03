@@ -1,6 +1,6 @@
 // Toolbar actions: create, rename, delete, download, upload.
 import { call } from './transport.js';
-import { els, state, currentArea, setStatus, fail, selectOnly } from './state.js';
+import { els, state, currentArea, setStatus, fail, selectOnly, focusTree } from './state.js';
 import { join, parentOf, baseName, formatSize, toBase64 } from './format.js';
 import { loadFolder, reloadExpanded, renderTree, updateButtons, showUsage } from './tree.js';
 import { showDetail, readAll } from './detail.js';
@@ -31,6 +31,7 @@ function askName(label, initial = '') {
     form.append(text, ok, cancel);
     const done = (value) => {
       form.remove();
+      focusTree();
       resolve(value);
     };
     form.addEventListener('submit', (event) => {
@@ -58,6 +59,7 @@ function askConfirm(message, action) {
     box.append(text, yes, no);
     const done = (value) => {
       box.remove();
+      focusTree();
       resolve(value);
     };
     yes.addEventListener('click', () => done(true));
@@ -109,6 +111,20 @@ export async function rename() {
       state.expanded.add(newPath);
     }
     await afterChange(`Renamed to ${newName}.`, newPath, sel.kind);
+  } catch (error) {
+    fail(error);
+  }
+}
+
+export async function duplicate() {
+  const sel = state.selected;
+  if (!sel || !sel.path) return;
+  if (state.dirty) return setStatus('Save or discard your changes first.', 'error');
+  const folder = parentOf(sel.path);
+  try {
+    const { path } = await call('copy', { area: currentArea(), path: sel.path, toDir: folder });
+    state.expanded.add(folder);
+    await afterChange(`Duplicated as ${baseName(path)}.`, path, sel.kind);
   } catch (error) {
     fail(error);
   }

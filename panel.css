@@ -77,8 +77,9 @@ svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; s
 .icon-button:hover:not(:disabled) { background: var(--accent-soft); }
 .icon-button[data-tip]:hover::after, .icon-button[data-tip]:focus-visible::after {
   content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 10;
-  padding: 3px 8px; border-radius: 6px; background: var(--fg); color: var(--surface); font-size: 12px; font-weight: 500; white-space: nowrap; pointer-events: none;
+  padding: 3px 8px; border-radius: 6px; background: var(--fg); color: var(--surface); font-size: 12px; font-weight: 500; white-space: nowrap;
 }
+.tools.tips-off .icon-button::after { display: none; }
 .icon-button:first-child[data-tip]::after { left: 0; transform: none; }
 .crumbs { flex: 1; display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
 .crumb { flex: 0 1 auto; min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
@@ -176,3 +177,21 @@ meter::-moz-meter-bar { border-radius: 3px; background: var(--accent-fill); }
   .icon-button svg, .pill svg { color: ButtonText; }
   meter { appearance: auto; border: 1px solid CanvasText; }
 }
+
+/* Right-click menu and shortcut help. */
+.menu { position: fixed; z-index: 20; min-width: 200px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+.menu [role=menuitem] { display: flex; justify-content: space-between; gap: 24px; padding: 4px 10px; border-radius: 6px; cursor: default; }
+.menu [role=menuitem]:hover:not([aria-disabled]) { background: var(--hover); }
+.menu [role=menuitem]:focus { outline: none; background: var(--accent-fill); color: var(--accent-fg); }
+.menu [role=menuitem][aria-disabled] { opacity: 0.45; }
+.menu .hint { color: var(--muted); }
+.menu [role=menuitem]:focus .hint { color: inherit; }
+dialog { max-width: 420px; max-height: 80vh; display: none; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--fg); }
+dialog[open] { display: flex; }
+dialog::backdrop { background: rgb(0 0 0 / 40%); }
+dialog h2 { margin: 0; font-size: 15px; }
+.help-scroll { overflow: auto; }
+.help-scroll table { width: 100%; border-collapse: collapse; }
+.help-scroll th, .help-scroll td { padding: 3px 8px; text-align: left; border-bottom: 1px solid var(--line); }
+.help-scroll .keys { white-space: nowrap; font-family: ui-monospace, monospace; }
+dialog form { align-self: flex-end; margin: 0; }

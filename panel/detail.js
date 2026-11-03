@@ -271,10 +271,12 @@ function editor(path, text) {
   area.setAttribute('aria-label', `Contents of ${baseName(path)}`);
   const save = document.createElement('button');
   save.className = 'primary';
+  save.dataset.cmd = 'save';
   save.textContent = 'Save';
   save.disabled = true;
   const discard = document.createElement('button');
   discard.textContent = 'Discard changes';
+  discard.dataset.cmd = 'discard';
   discard.disabled = true;
   const hint = document.createElement('span');
   hint.className = 'note';

@@ -56,3 +56,9 @@ export function setStatus(message, kind = '') {
 export function fail(error) {
   setStatus(error.message || String(error), 'error');
 }
+
+// Puts focus back on the tree's current row.
+export function focusTree() {
+  const row = els.tree.querySelector('[tabindex="0"]');
+  if (row) row.focus({ preventScroll: true });
+}

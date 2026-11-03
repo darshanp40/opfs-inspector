@@ -332,6 +332,113 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.context().close();
     });
 
+    it('right-click a row opens a menu with Rename, Duplicate, Delete and their shortcut hints', async () => {
+      const p = await freshPage(['a.txt']);
+      await p.reload();
+      await p.locator('.row[data-path="a.txt"]').click({ button: 'right' });
+      await p.locator('[role=menu]').waitFor();
+      const items = p.locator('[role=menu] [role=menuitem]');
+      const text = await items.allTextContents();
+      for (const [label, keys] of [['Rename', /F2/], ['Duplicate', /D$/], ['Delete', /⌦|Delete/]]) {
+        assert.match(text.find((t) => t.startsWith(label)) || '', keys, label);
+      }
+      // Arrow keys, Escape and focus coming back to the tree.
+      assert.equal(await p.evaluate(() => document.activeElement.getAttribute('role')), 'menuitem');
+      await p.keyboard.press('ArrowDown');
+      await p.keyboard.press('Escape');
+      assert.equal(await p.locator('[role=menu]').count(), 0);
+      assert.equal(await focused(p), 'a.txt');
+      // Enter runs the item.
+      await p.locator('.row[data-path="a.txt"]').click({ button: 'right' });
+      await p.locator('[role=menuitem]', { hasText: 'Duplicate' }).click();
+      await p.locator('.row[data-path="a copy.txt"]').waitFor();
+      assert.match(await p.locator('#status').textContent(), /Duplicated as a copy\.txt/);
+      assert.equal(await p.locator('.row[data-path="a copy.txt"]').getAttribute('aria-selected'), 'true');
+      await p.context().close();
+    });
+
+    it('F2 starts rename; Mod+D duplicates; Delete asks first', async () => {
+      const p = await freshPage(['a.txt']);
+      await p.reload();
+      await p.locator('.row[data-path="a.txt"]').click();
+      await p.locator('#card-tabs [role=tab]').first().waitFor();
+      await p.keyboard.press('F2');
+      await p.locator('#card-body form input').waitFor();
+      await p.locator('#card-body form button', { hasText: 'Cancel' }).click();
+      assert.equal(await focused(p), 'a.txt');
+      await p.keyboard.press('ControlOrMeta+d');
+      await p.locator('.row[data-path="a copy.txt"]').waitFor();
+      await p.keyboard.press('Delete');
+      await p.locator('#card-body .actions', { hasText: 'Delete a copy.txt?' }).waitFor();
+      await p.context().close();
+    });
+
+    it('Alt+R refreshes, Mod+S saves in the editor and downloads from the tree, Mod+A selects text in the editor', async () => {
+      const p = await freshPage(['n.txt']);
+      await p.reload();
+      await p.locator('.row[data-path="n.txt"]').click();
+      const editor = p.locator('textarea.editor');
+      await editor.fill('hello');
+      await editor.press('ControlOrMeta+a');
+      assert.equal(await p.evaluate(() => document.activeElement.selectionEnd - document.activeElement.selectionStart), 5);
+      assert.equal(await p.locator('#tree [aria-selected="true"]').count(), 1);
+      await editor.press('ControlOrMeta+s');
+      await p.waitForFunction(() => document.getElementById('status').textContent.includes('Saved'));
+      await p.locator('.row[data-path="n.txt"]').focus();
+      const [download] = await Promise.all([p.waitForEvent('download'), p.keyboard.press('ControlOrMeta+s')]);
+      assert.equal(download.suggestedFilename(), 'n.txt');
+      await p.evaluate(async () => (await navigator.storage.getDirectory()).getFileHandle('later.txt', { create: true }));
+      await p.keyboard.press('Alt+r');
+      await p.locator('.row[data-path="later.txt"]').waitFor();
+      await p.context().close();
+    });
+
+    it('? lists at least 20 shortcuts', async () => {
+      const p = await freshPage([]);
+      await p.reload();
+      await p.locator('.row[data-path=""]').click();
+      await p.keyboard.press('?');
+      await p.locator('#help[open]').waitFor();
+      assert.ok(await p.locator('#help [role=row]').count() >= 20);
+      await p.keyboard.press('Escape');
+      assert.equal(await p.locator('#help[open]').count(), 0);
+      await p.context().close();
+    });
+
+    it("shortcut hints use the platform's modifier", async () => {
+      for (const [platform, want, other] of [['MacIntel', '⌘⇧N', 'Ctrl'], ['Win32', 'Ctrl+Shift+N', '⌘']]) {
+        const p = await (await browser.newContext()).newPage();
+        await p.addInitScript((value) => Object.defineProperty(navigator, 'platform', { get: () => value }), platform);
+        await p.goto(`${origin}/panel.html?harness`);
+        await p.locator('.row[data-path=""]').click();
+        await p.keyboard.press('?');
+        await p.locator('#help[open]').waitFor();
+        const text = await p.locator('#help').textContent();
+        assert.ok(text.includes(want), `${platform}: ${want}`);
+        assert.ok(!text.includes(other), `${platform}: no ${other}`);
+        assert.ok((await p.getAttribute('#new-folder', 'data-tip')).includes(want));
+        await p.context().close();
+      }
+    });
+
+    it('a toolbar tooltip keeps its text and Esc hides it', async () => {
+      const p = await freshPage([]);
+      await p.reload();
+      const tip = () => p.evaluate(() => {
+        const after = getComputedStyle(document.getElementById('new-file'), '::after');
+        return after.display === 'none' ? 'none' : document.getElementById('new-file').dataset.tip;
+      });
+      await p.locator('#new-file').focus();
+      await p.keyboard.press('Shift+Tab');
+      await p.keyboard.press('Tab');
+      assert.match(await tip(), /Create a file in the selected folder/);
+      await p.mouse.move(300, 300);
+      assert.match(await tip(), /Create a file/, 'stays while focused');
+      await p.keyboard.press('Escape');
+      assert.equal(await tip(), 'none');
+      await p.context().close();
+    });
+
     it('axe finds no serious violations', async () => {
       await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
@@ -356,6 +463,19 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
           const bad = violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
           assert.deepEqual(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(' ')}`), [], `${JSON.stringify(media)} ${path}`);
         }
+        const scan = async (name) => {
+          const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+          const bad = violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
+          assert.deepEqual(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(' ')}`), [], `${JSON.stringify(media)} ${name}`);
+        };
+        await row('readme.md').click({ button: 'right' });
+        await page.locator('[role=menu]').waitFor();
+        await scan('context menu');
+        await page.keyboard.press('Escape');
+        await row('readme.md').press('?');
+        await page.locator('#help[open]').waitFor();
+        await scan('help');
+        await page.keyboard.press('Escape');
       }
     });
   });
