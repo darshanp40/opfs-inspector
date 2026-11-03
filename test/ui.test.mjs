@@ -1194,6 +1194,77 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       assert.equal(await page.evaluate(() => window.__pwned), undefined);
     });
 
+    const putText = (name, text) => page.evaluate(async ([name, text]) => {
+      const root = await navigator.storage.getDirectory();
+      const writable = await (await root.getFileHandle(name, { create: true })).createWritable();
+      await writable.write(text);
+      await writable.close();
+    }, [name, text]);
+
+    it('headings and lists render', async () => {
+      await putText('notes.md', '# Title\n\n## Sub\n\n- one\n- two\n\n[site](https://example.com)');
+      await page.reload();
+      await row('notes.md').click();
+      await page.locator('#card-body .markdown h1').waitFor();
+      assert.equal(await page.locator('#card-body .markdown h2').textContent(), 'Sub');
+      assert.equal(await page.locator('#card-body .markdown li').count(), 2);
+      assert.equal(await page.locator('#card-tabs [aria-selected=true]').textContent(), 'Preview');
+      const link = page.locator('#card-body .markdown a');
+      assert.equal(await link.getAttribute('target'), '_blank');
+      assert.equal(await link.getAttribute('rel'), 'noopener noreferrer');
+    });
+
+    it('preview shows unsaved editor text', async () => {
+      await page.getByRole('tab', { name: 'Editor' }).click();
+      await page.locator('.cm-content').waitFor();
+      await page.locator('.cm-content').click();
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.type('# Draft');
+      await page.getByRole('tab', { name: 'Preview' }).click();
+      await page.waitForFunction(() => document.querySelector('#card-body .markdown h1')?.textContent === 'Draft');
+      await page.getByRole('tab', { name: 'Editor' }).click();
+      await page.locator('[data-cmd=discard]').click();
+    });
+
+    it('hostile markdown is inert', async () => {
+      await putText('evil.md', [
+        '<script>window.top.__pwned=1</script>',
+        '<img src=x onerror="window.top.__pwned=1">',
+        '[x](javascript:window.top.__pwned=1)',
+        '<iframe src="https://example.com"></iframe>',
+        '<a href="JaVaScRiPt:alert(1)" onclick="window.top.__pwned=1">y</a>',
+        '<p style="color:red" onmouseover="window.top.__pwned=1">z</p>',
+      ].join('\n\n'));
+      await page.reload();
+      await row('evil.md').click();
+      await page.locator('#card-body .markdown').waitFor();
+      await page.waitForTimeout(300);
+      assert.equal(await page.evaluate(() => window.__pwned), undefined);
+      const bad = await page.evaluate(() => {
+        const body = document.getElementById('card-body');
+        const attrs = [...body.querySelectorAll('*')].flatMap((e) => [...e.attributes].map((a) => a.name)).filter((n) => /^on/.test(n) || n === 'style');
+        return {
+          tags: body.querySelectorAll('script, iframe').length,
+          attrs,
+          hrefs: [...body.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')).filter((h) => /^javascript:/i.test(h)),
+        };
+      });
+      assert.deepEqual(bad, { tags: 0, attrs: [], hrefs: [] });
+    });
+
+    it('markdown images make no request', async () => {
+      await putText('pic.md', 'Look: ![a cat](https://example.com/cat.png) and <img src="https://example.com/b.png" alt="dog">');
+      const requests = [];
+      page.on('request', (r) => { if (r.url().startsWith('https://example.com/')) requests.push(r.url()); });
+      await page.reload();
+      await row('pic.md').click();
+      await page.locator('#card-body .markdown').waitFor();
+      await page.waitForTimeout(500);
+      assert.deepEqual(requests, []);
+      assert.equal(await page.locator('#card-body .markdown img').count(), 0);
+      assert.match(await page.locator('#card-body .markdown').textContent(), /a cat/);
+    });
+
     it('axe finds no serious violations', async () => {
       await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
@@ -1214,7 +1285,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
         for (const path of ['readme.md', 'app.db', 'empty', 'three.png']) {
           await row(path).click();
           await page.locator('#card-tabs [role=tab]').first().waitFor();
-          if (path === 'readme.md') await page.locator('.cm-editor').waitFor();
+          if (path === 'readme.md') await page.locator('#card-body .markdown h1').waitFor();
           if (path === 'three.png') await page.waitForFunction(() => document.querySelector('.image-port img')?.naturalWidth === 3);
           await page.waitForFunction(() => /of|not available/.test(document.getElementById('usage').textContent));
           const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();

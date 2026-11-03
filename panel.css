@@ -252,3 +252,25 @@ dialog form { align-self: flex-end; margin: 0; }
 .image-port { flex: 1; min-height: 120px; overflow: auto; display: flex; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .image-port img { margin: auto; flex: none; max-width: none; }
 .image-port img[hidden] { display: none; }
+
+/* Markdown preview. */
+.markdown { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); line-height: 1.55; overflow-wrap: anywhere; }
+.markdown :is(h1, h2, h3, h4, h5, h6) { margin: 1em 0 0.4em; line-height: 1.25; }
+.markdown h1 { font-size: 1.6em; padding-bottom: 0.2em; border-bottom: 1px solid var(--line); }
+.markdown h2 { font-size: 1.3em; }
+.markdown h3 { font-size: 1.1em; }
+.markdown :is(p, ul, ol, pre, blockquote, table) { margin: 0.6em 0; }
+.markdown a { color: var(--accent); }
+.markdown code { padding: 1px 4px; border-radius: 4px; background: var(--surface-2); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.9em; }
+.markdown pre { padding: 8px 10px; overflow: auto; border-radius: 6px; background: var(--surface-2); }
+.markdown pre code { padding: 0; background: none; }
+.markdown blockquote { padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.markdown table { border-collapse: collapse; }
+.markdown :is(th, td) { padding: 4px 8px; border: 1px solid var(--line); }
+.markdown hr { border: 0; border-top: 1px solid var(--line); }
+@media (forced-colors: active) {
+  .markdown { border-color: CanvasText; }
+  .markdown a { color: LinkText; }
+  .markdown :is(code, pre) { border: 1px solid CanvasText; background: Canvas; }
+  .markdown :is(h1, th, td, blockquote, hr) { border-color: CanvasText; }
+}

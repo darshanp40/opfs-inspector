@@ -127,8 +127,8 @@ export const TABS = {
 };
 
 export function tabsFor(type) {
-  // Preview has a renderer for images only so far.
-  const names = TABS_BY_TYPE[type].filter((name) => name in TABS && (name !== 'Preview' || type === 'image' || type === 'svg'));
+  // Preview has a renderer for images and Markdown.
+  const names = TABS_BY_TYPE[type].filter((name) => name in TABS && (name !== 'Preview' || ['image', 'svg', 'markdown'].includes(type)));
   // Until a type's own views exist, show its bytes.
   if (type !== 'folder' && names.length === 1) names.unshift('Bytes');
   return names;
@@ -298,7 +298,8 @@ function drawCard(item) {
         t.panel.hidden = !on;
       }
       // Draw a tab the first time it opens, then keep it, so edits survive.
-      if (!panel.hasChildNodes()) panel.append(TABS[name](item));
+      // The Markdown preview is drawn again, to show the editor's text.
+      if (!panel.hasChildNodes() || (name === 'Preview' && item.type === 'markdown')) panel.replaceChildren(TABS[name](item));
       state.tab = { path: item.path, name };
     };
     tab.addEventListener('click', open);
@@ -356,6 +357,7 @@ function note(text, isError = false) {
 
 // The image is read when the tab opens. Over the limit, it offers Download.
 function preview(item) {
+  if (item.type === 'markdown') return markdownPreview(item);
   const box = document.createElement('div');
   box.className = 'image-box';
   if (item.size > IMAGE_LIMIT) {
@@ -372,6 +374,22 @@ function preview(item) {
     if (!box.isConnected) return;
     const type = imageMime(name, item.headBytes) || 'application/octet-stream';
     openImage = showImage(box, new Blob([bytes], { type }), name);
+  }).catch(fail);
+  return box;
+}
+
+// Shows the editor's text, saved or not, once the editor has been opened.
+// The renderer loads on first use.
+function markdownPreview(item) {
+  const box = document.createElement('div');
+  box.className = 'markdown';
+  box.tabIndex = 0;
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-label', `Preview of ${baseName(item.path)}`);
+  box.append(note('Loading the preview…'));
+  import('./markdown.entry.js').then(({ renderMarkdown }) => {
+    if (!box.isConnected) return;
+    box.replaceChildren(renderMarkdown(openEditor ? openEditor.getText() : item.text));
   }).catch(fail);
   return box;
 }
