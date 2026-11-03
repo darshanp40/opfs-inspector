@@ -158,6 +158,93 @@ for (const engine of engines) {
       await page.evaluate(() => globalThis.holder.terminate());
     });
 
+    const put = async (path, text) => {
+      await ok('createFile', { area, path });
+      if (text) await ok('writeText', { area, path, text });
+    };
+    const names = async (path) => (await ok('list', { area, path })).map((e) => e.name);
+
+    it('copy picks a free name', async (t) => {
+      if (!canWrite) return t.skip('this browser cannot write from a page');
+      await ok('createFolder', { area, path: 'cp' });
+      await put('cp/a.txt', 'abc');
+      assert.deepEqual(await ok('copy', { area, path: 'cp/a.txt', toDir: 'cp' }), { path: 'cp/a copy.txt' });
+      assert.deepEqual(await ok('copy', { area, path: 'cp/a.txt', toDir: 'cp' }), { path: 'cp/a copy 2.txt' });
+      for (const name of ['a copy.txt', 'a copy 2.txt']) {
+        const read = await ok('read', { area, path: `cp/${name}` });
+        assert.equal(Buffer.from(read.data, 'base64').toString(), 'abc');
+      }
+    });
+
+    it('copy duplicates a folder with its contents', async (t) => {
+      if (!canWrite) return t.skip('this browser cannot write from a page');
+      await ok('createFolder', { area, path: 'cf' });
+      await ok('createFolder', { area, path: 'cf/sub' });
+      await put('cf/sub/b.txt', 'xy');
+      const { path } = await ok('copy', { area, path: 'cf', toDir: '' });
+      assert.equal(path, 'cf copy');
+      assert.deepEqual(await names('cf copy/sub'), ['b.txt']);
+      const read = await ok('read', { area, path: 'cf copy/sub/b.txt' });
+      assert.equal(Buffer.from(read.data, 'base64').toString(), 'xy');
+    });
+
+    it('move into another folder', async () => {
+      await ok('createFolder', { area, path: 'mx' });
+      await ok('createFolder', { area, path: 'my' });
+      await put('mx/a.txt');
+      assert.deepEqual(await ok('move', { area, path: 'mx/a.txt', toDir: 'my' }), { path: 'my/a.txt' });
+      assert.deepEqual(await names('my'), ['a.txt']);
+      assert.deepEqual(await names('mx'), []);
+    });
+
+    it('move refuses a folder into itself', async () => {
+      await ok('createFolder', { area, path: 'mi' });
+      await ok('createFolder', { area, path: 'mi/sub' });
+      const reply = await run('move', { area, path: 'mi', toDir: 'mi/sub' });
+      assert.match(reply.error, /cannot be moved into itself/);
+      assert.deepEqual(await names('mi/sub'), []);
+    });
+
+    it('move refuses a clash', async (t) => {
+      if (!canWrite) return t.skip('this browser cannot write from a page');
+      await ok('createFolder', { area, path: 'mc' });
+      await ok('createFolder', { area, path: 'md' });
+      await put('mc/a.txt', 'one');
+      await put('md/a.txt', 'two');
+      const reply = await run('move', { area, path: 'mc/a.txt', toDir: 'md' });
+      assert.match(reply.error, /already exists/);
+      const text = async (path) => Buffer.from((await ok('read', { area, path })).data, 'base64').toString();
+      assert.equal(await text('mc/a.txt'), 'one');
+      assert.equal(await text('md/a.txt'), 'two');
+    });
+
+    it('dirSize own vs recursive', async (t) => {
+      if (!canWrite) return t.skip('this browser cannot write from a page');
+      await ok('createFolder', { area, path: 'd' });
+      await ok('createFolder', { area, path: 'd/s' });
+      await put('d/a', 'abc');
+      await put('d/s/b', 'hello');
+      assert.deepEqual(await ok('dirSize', { area, path: 'd', recursive: false }), { bytes: 3, files: 1, folders: 1 });
+      assert.deepEqual(await ok('dirSize', { area, path: 'd', recursive: true }), { bytes: 8, files: 2, folders: 1 });
+    });
+
+    it('estimate returns numbers in Chromium', async (t) => {
+      if (engine.name !== 'chromium') return t.skip('only checked in Chromium');
+      const { usage, quota } = await ok('estimate', { area });
+      assert.ok(usage >= 0);
+      assert.ok(quota > 0);
+    });
+
+    it('stat returns size and lastModified', async (t) => {
+      if (!canWrite) return t.skip('this browser cannot write from a page');
+      await put('st.txt', 'abcd');
+      const stat = await ok('stat', { area, path: 'st.txt' });
+      assert.equal(stat.kind, 'file');
+      assert.equal(stat.size, 4);
+      assert.ok(stat.lastModified > 0);
+      assert.equal((await ok('stat', { area, path: 'cp' })).kind, 'directory');
+    });
+
     it('lists and opens storage buckets, without creating missing ones', async (t) => {
       if (engine.name !== 'chromium') return t.skip('only Chromium has Storage Buckets');
       await page.evaluate(async () => {

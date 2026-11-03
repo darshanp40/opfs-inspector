@@ -120,6 +120,37 @@
     return false;
   }
 
+  // The file or folder with this name, whichever it is.
+  async function entryAt(dir, name) {
+    try {
+      return await dir.getFileHandle(name);
+    } catch (error) {
+      if (error.name !== 'TypeMismatchError') throw error;
+      return dir.getDirectoryHandle(name);
+    }
+  }
+
+  function tooDeep(path, toDir) {
+    const from = splitPath(path).join('/');
+    const to = splitPath(toDir).join('/');
+    return to === from || to.startsWith(`${from}/`);
+  }
+
+  const joinPath = (dir, name) => [...splitPath(dir), name].join('/');
+
+  async function sizeOf(dir, recursive, total) {
+    for await (const child of dir.values()) {
+      if (child.kind === 'file') {
+        total.bytes += (await child.getFile()).size;
+        total.files++;
+      } else {
+        total.folders++;
+        if (recursive) await sizeOf(child, true, total);
+      }
+    }
+    return total;
+  }
+
   const ops = {
     async areas() {
       const areas = [{ id: 'default', label: 'Default storage', area: DEFAULT_AREA }];
@@ -190,13 +221,7 @@
       const { parent, name } = await parentAndName(area, path);
       if (newName === name) return;
       if (await exists(parent, newName)) throw new Error(`"${newName}" already exists.`);
-      let handle;
-      try {
-        handle = await parent.getFileHandle(name);
-      } catch (error) {
-        if (error.name !== 'TypeMismatchError') throw error;
-        handle = await parent.getDirectoryHandle(name);
-      }
+      const handle = await entryAt(parent, name);
       if (typeof handle.move === 'function') {
         try {
           await handle.move(newName);
@@ -208,6 +233,79 @@
       // No move(): copy, then delete the original.
       await copyInto(handle, parent, newName);
       await parent.removeEntry(name, { recursive: true });
+    },
+
+    async copy({ area, path, toDir, newName }) {
+      const { parent, name } = await parentAndName(area, path);
+      const source = await entryAt(parent, name);
+      if (source.kind === 'directory' && tooDeep(path, toDir)) {
+        throw new Error('A folder cannot be copied into itself.');
+      }
+      const target = await dirAt(area, splitPath(toDir));
+      let finalName = newName;
+      if (finalName) {
+        checkName(finalName);
+        if (await exists(target, finalName)) throw new Error(`"${finalName}" already exists.`);
+      } else {
+        // "a.txt" -> "a copy.txt" -> "a copy 2.txt". A folder has no extension.
+        const dot = source.kind === 'file' ? name.lastIndexOf('.') : -1;
+        const stem = dot > 0 ? name.slice(0, dot) : name;
+        const ext = dot > 0 ? name.slice(dot) : '';
+        finalName = `${stem} copy${ext}`;
+        for (let n = 2; await exists(target, finalName); n++) finalName = `${stem} copy ${n}${ext}`;
+      }
+      await copyInto(source, target, finalName);
+      return { path: joinPath(toDir, finalName) };
+    },
+
+    async move({ area, path, toDir }) {
+      const { parent, name } = await parentAndName(area, path);
+      if (tooDeep(path, toDir)) throw new Error('A folder cannot be moved into itself.');
+      const target = await dirAt(area, splitPath(toDir));
+      if (await exists(target, name)) {
+        throw new Error(`"${name}" already exists in ${splitPath(toDir).join('/') || '/'}.`);
+      }
+      const handle = await entryAt(parent, name);
+      if (typeof handle.move === 'function') {
+        try {
+          await handle.move(target);
+          return { path: joinPath(toDir, name) };
+        } catch (error) {
+          if (error.name !== 'NotSupportedError' && error.name !== 'TypeError') throw error;
+        }
+      }
+      // No move(): copy, then delete the original.
+      await copyInto(handle, target, name);
+      await parent.removeEntry(name, { recursive: true });
+      return { path: joinPath(toDir, name) };
+    },
+
+    // Folders count the ones directly inside, or all of them when recursive.
+    async dirSize({ area, path, recursive }) {
+      const dir = await dirAt(area, splitPath(path));
+      return sizeOf(dir, Boolean(recursive), { bytes: 0, files: 0, folders: 0 });
+    },
+
+    async estimate({ area = DEFAULT_AREA }) {
+      let storage = navigator.storage;
+      if (area.kind === 'bucket') {
+        // Same rule as root(): only open a bucket that exists.
+        if (!(await bucketNames()).includes(area.name)) {
+          throw Object.assign(new Error(`The bucket "${area.name}" no longer exists.`), { name: 'NotFoundError' });
+        }
+        storage = await navigator.storageBuckets.open(area.name);
+      }
+      if (!storage || !storage.estimate) return { usage: null, quota: null };
+      const { usage, quota } = await storage.estimate();
+      return { usage, quota };
+    },
+
+    async stat({ area, path }) {
+      const { parent, name } = await parentAndName(area, path);
+      const handle = await entryAt(parent, name);
+      if (handle.kind === 'directory') return { kind: 'directory' };
+      const file = await handle.getFile();
+      return { kind: 'file', size: file.size, lastModified: file.lastModified };
     },
 
     async remove({ area, path }) {
