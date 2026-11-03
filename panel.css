@@ -16,6 +16,7 @@
   --ok: #1e6b35;
   --ok-bg: #e6f4ea;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
+  --row-h: 28px;
   --i-folder: #d08a10;
   --i-json: #b7791f;
   --i-code: #7c4dcc;
@@ -95,8 +96,11 @@ svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; s
 
 /* Tree on the left, card on the right. */
 .layout { flex: 1; display: flex; gap: 8px; min-height: 0; padding: 8px; }
-.tree { width: 38%; min-width: 220px; max-width: 460px; overflow: auto; padding: 2px; }
-.row { display: flex; gap: 6px; align-items: center; padding: 4px 8px; margin-bottom: 1px; border-radius: 7px; cursor: default; white-space: nowrap; user-select: none; }
+.tree { width: 38%; min-width: 220px; max-width: 460px; overflow: auto; }
+/* Rows sit at fixed offsets in a spacer as tall as the whole list. */
+.tree-space { position: relative; }
+.tree-space > * { position: absolute; left: 2px; right: 2px; height: calc(var(--row-h) - 1px); }
+.row { display: flex; gap: 6px; align-items: center; padding: 0 8px; border-radius: 7px; cursor: default; white-space: nowrap; user-select: none; }
 .row:hover { background: var(--hover); }
 .row:focus-visible { outline-offset: -2px; }
 .row.selected { background: var(--accent-fill); color: var(--accent-fg); }
@@ -110,7 +114,7 @@ svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; s
 .row .size { margin-left: auto; padding-left: 12px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .row.error .name { color: var(--error); }
 .row.selected.error .name { color: inherit; text-decoration: underline wavy; }
-.empty { color: var(--muted); padding: 3px 8px; font-style: italic; }
+.empty { display: flex; align-items: center; color: var(--muted); font-style: italic; }
 
 .icon { color: var(--i-file); }
 .icon-folder { color: var(--i-folder); }

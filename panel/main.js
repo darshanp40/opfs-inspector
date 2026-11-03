@@ -1,7 +1,7 @@
 // Start-up: wires the toolbar and loads the first listing.
 import { onNavigated } from './transport.js';
 import { applyTheme } from './theme.js';
-import { els, state, setStatus } from './state.js';
+import { els, state, setStatus, selectOnly } from './state.js';
 import { refresh, updateButtons } from './tree.js';
 import { create, rename, remove, download, upload } from './actions.js';
 
@@ -13,7 +13,7 @@ els.area.addEventListener('change', async () => {
   state.areaId = els.area.value;
   state.expanded = new Set(['']);
   state.children.clear();
-  state.selected = null;
+  selectOnly(null);
   await refresh();
 });
 els.refresh.addEventListener('click', () => {
@@ -35,7 +35,7 @@ els.uploadInput.addEventListener('change', async () => {
 onNavigated(() => {
   state.expanded = new Set(['']);
   state.children.clear();
-  state.selected = null;
+  selectOnly(null);
   state.dirty = false;
   state.areaId = 'default';
   refresh();

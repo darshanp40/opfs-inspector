@@ -168,8 +168,10 @@
     // One level only. Sizes come from this folder's files, nothing deeper.
     async list({ area, path }) {
       const dir = await dirAt(area, splitPath(path));
-      const entries = [];
-      for await (const handle of dir.values()) {
+      const handles = [];
+      for await (const handle of dir.values()) handles.push(handle);
+      // Reading sizes in parallel keeps a 10,000-file folder fast.
+      const entries = await Promise.all(handles.map(async (handle) => {
         const entry = { name: handle.name, kind: handle.kind };
         if (handle.kind === 'file') {
           try {
@@ -180,8 +182,8 @@
             entry.error = explain(error);
           }
         }
-        entries.push(entry);
-      }
+        return entry;
+      }));
       entries.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'directory' ? -1 : 1));
       return entries;
     },

@@ -161,6 +161,114 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
     });
 
+    // A page in its own context, so its files do not mix with the other tests.
+    async function freshPage(names, folder = '') {
+      const p = await (await browser.newContext()).newPage();
+      await p.goto(`${origin}/panel.html?harness`);
+      await p.evaluate(async ({ names, folder }) => {
+        let dir = await navigator.storage.getDirectory();
+        for (const part of folder.split('/').filter(Boolean)) dir = await dir.getDirectoryHandle(part, { create: true });
+        for (let i = 0; i < names.length; i += 500) {
+          await Promise.all(names.slice(i, i + 500).map((n) => (n.endsWith('/') ? dir.getDirectoryHandle(n.slice(0, -1), { create: true }) : dir.getFileHandle(n, { create: true }))));
+        }
+      }, { names, folder });
+      return p;
+    }
+    const manyNames = (n) => Array.from({ length: n }, (_, i) => `f${String(i).padStart(5, '0')}.txt`);
+    const focused = (p) => p.evaluate(() => document.activeElement.dataset.path);
+
+    it('arrow keys move focus, Right expands, Left collapses', async () => {
+      const p = await freshPage(['a/', 'b/', 'c.txt']);
+      await p.evaluate(async () => (await (await navigator.storage.getDirectory()).getDirectoryHandle('a')).getFileHandle('inner.txt', { create: true }));
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      await r('c.txt').waitFor();
+      assert.equal(await p.getAttribute('#tree', 'aria-multiselectable'), 'true');
+      await r('').click();
+      await p.keyboard.press('ArrowDown');
+      assert.equal(await focused(p), 'a');
+      assert.equal(await p.locator('#tree [tabindex="0"]').count(), 1);
+      await p.keyboard.press('ArrowRight');
+      await r('a/inner.txt').waitFor();
+      assert.equal(await r('a').getAttribute('aria-expanded'), 'true');
+      assert.equal(await focused(p), 'a');
+      assert.deepEqual(await Promise.all(['', 'a', 'a/inner.txt'].map((path) => r(path).getAttribute('aria-level'))), ['1', '2', '3']);
+      await p.keyboard.press('ArrowRight');
+      assert.equal(await focused(p), 'a/inner.txt');
+      await p.keyboard.press('ArrowLeft');
+      assert.equal(await focused(p), 'a');
+      await p.keyboard.press('ArrowLeft');
+      await p.waitForFunction(() => !document.querySelector('.row[data-path="a/inner.txt"]'));
+      assert.equal(await r('a').getAttribute('aria-expanded'), 'false');
+      await p.keyboard.press('End');
+      assert.equal(await focused(p), 'c.txt');
+      await p.keyboard.press('Home');
+      assert.equal(await focused(p), '');
+      await p.keyboard.press('b');
+      assert.equal(await focused(p), 'b');
+      await p.keyboard.press('Enter');
+      await p.locator('#card-head', { hasText: 'b' }).waitFor();
+      assert.equal(await r('b').getAttribute('aria-selected'), 'true');
+      await p.context().close();
+    });
+
+    it('Ctrl/Cmd+click adds, Shift+click selects a range, Ctrl/Cmd+A selects all in view', async () => {
+      const p = await freshPage(['f1.txt', 'f2.txt', 'f3.txt', 'f4.txt', 'f5.txt']);
+      await p.reload();
+      const r = (path) => p.locator(`.row[data-path="${path}"]`);
+      const count = () => p.locator('#tree [aria-selected="true"]').count();
+      await r('f1.txt').click();
+      await r('f3.txt').click({ modifiers: ['ControlOrMeta'] });
+      assert.equal(await count(), 2);
+      await r('f5.txt').click({ modifiers: ['Shift'] });
+      assert.equal(await count(), 3);
+      await p.keyboard.press('ControlOrMeta+a');
+      assert.equal(await count(), 5);
+      assert.match(await p.locator('#status').textContent(), /5 items selected/);
+      await p.context().close();
+    });
+
+    it('10,000 files', async () => {
+      const p = await freshPage(manyNames(10_000), 'big');
+      await p.reload();
+      await p.locator('.row[data-path="big"]').click();
+      const start = Date.now();
+      await p.keyboard.press('ArrowRight');
+      await p.locator('.row[data-path="big/f00000.txt"]').waitFor();
+      const took = Date.now() - start;
+      console.log(`# ${engine.name}: 10,000-file folder drew its first row in ${took} ms`);
+      // Firefox reads each file's size slowly (about 0.5 ms each), so it gets a looser guard.
+      const limit = engine.name === 'firefox' ? 10_000 : 1500;
+      assert.ok(took < limit, `${took} ms`);
+      assert.ok((await p.locator('.row').count()) < 200);
+      await p.keyboard.press('End');
+      assert.equal(await p.evaluate(() => document.activeElement.querySelector('.name').textContent), 'f09999.txt');
+      await p.context().close();
+    });
+
+    it('panel opens fast', async (t) => {
+      if (engine.name !== 'chromium') return t.skip('timed in Chromium only');
+      const p = await freshPage(manyNames(1000));
+      // Time from navigation start to the first row, taken in the page.
+      await p.addInitScript(() => {
+        new MutationObserver((_, observer) => {
+          if (!document.querySelector('.row')) return;
+          window.firstRow = performance.now();
+          observer.disconnect();
+        }).observe(document, { childList: true, subtree: true });
+      });
+      const times = [];
+      for (let i = 0; i < 3; i++) {
+        await p.goto(`${origin}/panel.html?harness`);
+        await p.waitForFunction(() => window.firstRow);
+        times.push(await p.evaluate(() => window.firstRow));
+      }
+      const median = times.sort((a, b) => a - b)[1];
+      console.log(`# chromium: first row after ${times.map(Math.round).join(', ')} ms`);
+      assert.ok(median < 300, `${median} ms`);
+      await p.context().close();
+    });
+
     it('axe finds no serious violations', async () => {
       await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();

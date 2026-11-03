@@ -1,6 +1,6 @@
-// The file tree: loading folders, drawing rows, selecting.
+// The file tree: loading folders, drawing rows, keys and selecting.
 import { call } from './transport.js';
-import { els, state, currentArea, setStatus, fail } from './state.js';
+import { els, state, currentArea, setStatus, fail, selectOnly, selectionChanged } from './state.js';
 import { join, parentOf, baseName, formatSize } from './format.js';
 import { showDetail } from './detail.js';
 import { iconFor } from './icons.js';
@@ -36,6 +36,11 @@ export async function refresh() {
     showUsage();
     await reloadExpanded();
     if (state.selected && !findEntry(state.selected.path)) state.selected = null;
+    const kept = [...state.selection].filter((p) => findEntry(p));
+    if (kept.length !== state.selection.size) {
+      state.selection = new Set(kept);
+      selectionChanged();
+    }
     renderTree();
     await showDetail();
     setStatus('');
@@ -109,43 +114,99 @@ function renderCrumbs() {
   if (again) again.focus();
 }
 
+// The tree draws only the rows in view, plus a buffer, inside a spacer
+// that is as tall as all rows. Every row has the same height (--row-h).
+const BUFFER = 20;
+const space = document.createElement('div');
+space.className = 'tree-space';
+space.setAttribute('role', 'none');
+els.tree.append(space);
+let rows = []; // every visible item, in order; { empty: true } is a folder's "empty" note
+let drawn = '';
+let rowH = 0;
+const rowHeight = () => rowH || (rowH = parseFloat(getComputedStyle(els.tree).getPropertyValue('--row-h')));
+const items = () => rows.filter((r) => !r.empty);
+
 export function renderTree() {
-  const rows = [];
-  const rootRow = row({ path: '', name: '/', kind: 'directory', depth: 0 });
-  rows.push(rootRow);
-  if (state.expanded.has('')) addChildren('', 1, rows);
-  els.tree.replaceChildren(...rows);
+  rows = [{ path: '', name: '/', kind: 'directory', depth: 0, pos: 1, setSize: 1 }];
+  if (state.expanded.has('')) addChildren('', 1);
+  space.style.height = `${rows.length * rowHeight()}px`;
+  drawRows(true);
   renderCrumbs();
 }
 
-function addChildren(path, depth, rows) {
+function addChildren(path, depth) {
   const list = state.children.get(path);
   if (!list) return;
-  if (list.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty';
-    // A tree may only hold tree items, so the note is a disabled one.
-    empty.setAttribute('role', 'treeitem');
-    empty.setAttribute('aria-disabled', 'true');
-    empty.style.paddingLeft = `${8 + depth * 16 + 20}px`;
-    empty.textContent = 'empty';
-    rows.push(empty);
-  }
-  for (const entry of list) {
+  if (list.length === 0) rows.push({ empty: true, depth, pos: 1, setSize: 1 });
+  list.forEach((entry, i) => {
     const childPath = join(path, entry.name);
-    rows.push(row({ ...entry, path: childPath, depth }));
-    if (entry.kind === 'directory' && state.expanded.has(childPath)) addChildren(childPath, depth + 1, rows);
+    rows.push({ ...entry, path: childPath, depth, pos: i + 1, setSize: list.length });
+    if (entry.kind === 'directory' && state.expanded.has(childPath)) addChildren(childPath, depth + 1);
+  });
+}
+
+// Index of the row that takes Tab focus: the focused path, or its nearest shown folder.
+function focusIndex() {
+  let path = state.focus || '';
+  for (;;) {
+    const i = rows.findIndex((r) => !r.empty && r.path === path);
+    if (i >= 0 || path === '') {
+      state.focus = rows[Math.max(i, 0)].path;
+      return Math.max(i, 0);
+    }
+    path = parentOf(path);
   }
+}
+
+function drawRows(force) {
+  const h = rowHeight();
+  const top = els.tree.scrollTop;
+  const first = Math.max(0, Math.floor(top / h) - BUFFER);
+  const last = Math.min(rows.length, Math.ceil((top + els.tree.clientHeight) / h) + BUFFER);
+  const focus = focusIndex();
+  const key = `${first}:${last}:${focus}`;
+  if (!force && key === drawn) return;
+  drawn = key;
+  const hadFocus = els.tree.contains(document.activeElement);
+  const list = [];
+  for (let i = first; i < last; i++) list.push(draw(i, focus));
+  // The focused row stays in the DOM even when scrolled away, so Tab still finds it.
+  if (focus < first || focus >= last) list.push(draw(focus, focus));
+  space.replaceChildren(...list);
+  if (hadFocus) space.querySelector('[tabindex="0"]').focus({ preventScroll: true });
+}
+
+function draw(i, focus) {
+  const item = rows[i];
+  const div = item.empty ? emptyNote(item) : row(item);
+  div.style.top = `${i * rowHeight()}px`;
+  div.tabIndex = i === focus ? 0 : -1;
+  div.setAttribute('aria-level', String(item.depth + 1));
+  div.setAttribute('aria-posinset', String(item.pos));
+  div.setAttribute('aria-setsize', String(item.setSize));
+  return div;
+}
+
+function emptyNote(item) {
+  const div = document.createElement('div');
+  div.className = 'empty';
+  // A tree may only hold tree items, so the note is a disabled one.
+  div.setAttribute('role', 'treeitem');
+  div.setAttribute('aria-disabled', 'true');
+  div.setAttribute('aria-selected', 'false');
+  div.style.paddingLeft = `${8 + item.depth * 16 + 20}px`;
+  div.textContent = 'empty';
+  return div;
 }
 
 function row(entry) {
   const div = document.createElement('div');
   div.className = 'row';
-  div.tabIndex = 0;
   div.setAttribute('role', 'treeitem');
   div.dataset.path = entry.path;
   div.style.paddingLeft = `${8 + entry.depth * 16}px`;
-  const selected = Boolean(state.selected && state.selected.path === entry.path);
+  const selected = state.selection.has(entry.path);
   div.classList.toggle('selected', selected);
   div.setAttribute('aria-selected', String(selected));
   if (entry.error) {
@@ -158,10 +219,6 @@ function row(entry) {
   if (entry.kind === 'directory') {
     if (state.expanded.has(entry.path)) twisty.classList.add('open');
     div.setAttribute('aria-expanded', String(state.expanded.has(entry.path)));
-    twisty.addEventListener('click', (event) => {
-      event.stopPropagation();
-      toggle(entry.path);
-    });
   }
   const name = document.createElement('span');
   name.className = 'name';
@@ -170,16 +227,89 @@ function row(entry) {
   size.className = 'size';
   size.textContent = entry.kind === 'file' ? formatSize(entry.size) : '';
   div.append(twisty, iconFor(entry), name, size);
-  div.addEventListener('click', () => select(entry.path, entry.kind));
-  div.addEventListener('dblclick', () => entry.kind === 'directory' && toggle(entry.path));
-  div.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') select(entry.path, entry.kind);
-    if (entry.kind === 'directory' && (event.key === 'ArrowRight' || event.key === 'ArrowLeft')) {
-      const open = state.expanded.has(entry.path);
-      if ((event.key === 'ArrowRight') !== open) toggle(entry.path);
-    }
-  });
   return div;
+}
+
+const itemAt = (target) => {
+  const div = target.closest('.row');
+  return div && rows.find((r) => !r.empty && r.path === div.dataset.path);
+};
+
+els.tree.addEventListener('scroll', () => drawRows(false));
+
+// A click or Tab moves the roving tabindex to that row.
+els.tree.addEventListener('focusin', (event) => {
+  const item = itemAt(event.target);
+  if (!item || item.path === state.focus) return;
+  const old = space.querySelector('[tabindex="0"]');
+  if (old) old.tabIndex = -1;
+  event.target.closest('.row').tabIndex = 0;
+  state.focus = item.path;
+});
+
+els.tree.addEventListener('click', (event) => {
+  const item = itemAt(event.target);
+  if (!item) return;
+  if (item.kind === 'directory' && event.target.closest('.twisty')) toggle(item.path);
+  else if (event.shiftKey) selectRange(item);
+  else if (event.ctrlKey || event.metaKey) toggleSelected(item);
+  else select(item.path, item.kind);
+});
+
+els.tree.addEventListener('dblclick', (event) => {
+  const item = itemAt(event.target);
+  if (item && item.kind === 'directory' && !event.target.closest('.twisty')) toggle(item.path);
+});
+
+let typed = '';
+let typedAt = 0;
+
+// The ARIA tree keyboard model.
+els.tree.addEventListener('keydown', (event) => {
+  const list = items();
+  const item = itemAt(event.target) || list.find((r) => r.path === state.focus);
+  if (!item) return;
+  const i = list.indexOf(item);
+  const mod = event.ctrlKey || event.metaKey;
+  const open = item.kind === 'directory' && state.expanded.has(item.path);
+  let to = null;
+  if (event.key === 'ArrowDown') to = list[i + 1];
+  else if (event.key === 'ArrowUp') to = list[i - 1];
+  else if (event.key === 'Home') to = list[0];
+  else if (event.key === 'End') to = list[list.length - 1];
+  else if (event.key === 'ArrowRight') {
+    if (item.kind === 'directory' && !open) toggle(item.path);
+    else if (open && list[i + 1] && list[i + 1].depth > item.depth) to = list[i + 1];
+  } else if (event.key === 'ArrowLeft') {
+    if (open) toggle(item.path);
+    else if (item.path !== '') to = list.find((r) => r.path === parentOf(item.path));
+  } else if (event.key === 'Enter') select(item.path, item.kind);
+  else if (event.key === ' ') mod ? toggleSelected(item) : select(item.path, item.kind);
+  else if (mod && event.key.toLowerCase() === 'a') selectAll();
+  else if (event.key.length === 1 && !mod && !event.altKey) {
+    // Typing jumps to the next name that starts with the typed letters.
+    const now = Date.now();
+    typed = now - typedAt < 500 ? typed + event.key : event.key;
+    typedAt = now;
+    const from = typed.length > 1 ? i : i + 1;
+    const want = typed.toLowerCase();
+    to = [...list.slice(from), ...list.slice(0, from)].find((r) => r.name.toLowerCase().startsWith(want));
+    if (!to) return;
+  } else return;
+  event.preventDefault();
+  if (!to) return;
+  if (event.shiftKey && event.key !== ' ') selectRange(to);
+  else moveFocus(to.path);
+});
+
+function moveFocus(path) {
+  state.focus = path;
+  const i = rows.findIndex((r) => !r.empty && r.path === path);
+  const h = rowHeight();
+  const tree = els.tree;
+  if (i * h < tree.scrollTop) tree.scrollTop = i * h;
+  else if ((i + 1) * h > tree.scrollTop + tree.clientHeight) tree.scrollTop = (i + 1) * h - tree.clientHeight;
+  drawRows(true);
 }
 
 export async function toggle(path) {
@@ -197,16 +327,62 @@ export async function toggle(path) {
   }
 }
 
+// Unsaved edits block every change of selection, except picking the same item again.
+function blocked(path) {
+  if (!state.dirty || (path != null && state.selected && state.selected.path === path)) return false;
+  setStatus('Save or discard your changes first.', 'error');
+  return true;
+}
+
 export async function select(path, kind) {
-  if (state.dirty && (!state.selected || state.selected.path !== path)) {
-    setStatus('Save or discard your changes first.', 'error');
-    return;
-  }
-  state.selected = { path, kind };
+  if (blocked(path)) return;
+  selectOnly({ path, kind });
   renderTree();
   updateButtons();
   setStatus('');
   await showDetail();
+}
+
+// Several items: the card shows the item last clicked (or keeps its item).
+function setSelection(paths, item) {
+  const moved = item && (!state.selected || state.selected.path !== item.path);
+  state.selection = new Set(paths);
+  if (item) {
+    state.selected = { path: item.path, kind: item.kind };
+    state.focus = item.path;
+  }
+  selectionChanged();
+  renderTree();
+  updateButtons();
+  const n = state.selection.size;
+  setStatus(n > 1 ? `${n} items selected.` : '');
+  if (moved) showDetail();
+}
+
+function toggleSelected(item) {
+  if (blocked(null)) return;
+  const next = new Set(state.selection);
+  if (!next.delete(item.path)) next.add(item.path);
+  state.anchor = item.path;
+  setSelection(next, item);
+}
+
+function selectRange(item) {
+  if (blocked(null)) return;
+  const list = items();
+  const to = list.indexOf(item);
+  let from = list.findIndex((r) => r.path === state.anchor);
+  if (from < 0) {
+    from = to;
+    state.anchor = item.path;
+  }
+  setSelection(list.slice(Math.min(from, to), Math.max(from, to) + 1).map((r) => r.path), item);
+}
+
+// Every shown item except the root, which cannot be acted on.
+function selectAll() {
+  if (blocked(null)) return;
+  setSelection(items().filter((r) => r.path !== '').map((r) => r.path), null);
 }
 
 export function updateButtons() {

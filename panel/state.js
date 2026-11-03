@@ -13,13 +13,37 @@ export const state = {
   canWrite: true,
   expanded: new Set(['']),
   children: new Map(),
-  selected: null, // { path, kind }
+  selected: null, // { path, kind } of the item the card shows
+  selection: new Set(), // paths of the selected rows
+  anchor: null, // path that Shift ranges start from
+  focus: '', // path of the row that takes Tab focus
   dirty: false,
   chunk: 512 * 1024,
   detailRun: 0,
   tab: null, // { path, name } of the open card tab
   usageRun: 0,
 };
+
+const selectionListeners = new Set();
+
+// Calls listener(state) after each selection change. Returns a function that stops it.
+export function onSelectionChange(listener) {
+  selectionListeners.add(listener);
+  return () => selectionListeners.delete(listener);
+}
+
+export function selectionChanged() {
+  for (const listener of selectionListeners) listener(state);
+}
+
+// Selects one item, or nothing, and shows it on the card.
+export function selectOnly(entry) {
+  state.selected = entry;
+  state.selection = new Set(entry ? [entry.path] : []);
+  state.anchor = entry ? entry.path : null;
+  if (entry) state.focus = entry.path;
+  selectionChanged();
+}
 
 export const currentArea = () => (state.areas.find((a) => a.id === state.areaId) || state.areas[0]).area;
 

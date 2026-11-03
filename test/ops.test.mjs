@@ -131,6 +131,34 @@ for (const engine of engines) {
       assert.ok(!names.includes('deeper'));
     });
 
+    it('list gives each file its size, and an error only for a file that cannot be read', async (t) => {
+      if (!canWrite) return t.skip('this browser cannot write from a page');
+      await ok('createFolder', { area, path: 'sizes' });
+      for (const [name, text] of [['one.txt', 'a'], ['three.txt', 'abc'], ['bad.txt', '']]) {
+        await ok('createFile', { area, path: `sizes/${name}` });
+        await ok('writeText', { area, path: `sizes/${name}`, text });
+      }
+      // Make getFile fail for one name only.
+      await page.evaluate(() => {
+        const real = FileSystemFileHandle.prototype.getFile;
+        globalThis.realGetFile = real;
+        FileSystemFileHandle.prototype.getFile = function () {
+          return this.name === 'bad.txt' ? Promise.reject(new DOMException('cannot read', 'NotReadableError')) : real.call(this);
+        };
+      });
+      try {
+        const list = await ok('list', { area, path: 'sizes' });
+        assert.deepEqual(list.map((e) => [e.name, e.size, e.error]), [
+          ['bad.txt', undefined, 'NotReadableError: cannot read'],
+          ['one.txt', 1, undefined],
+          ['three.txt', 3, undefined],
+        ]);
+      } finally {
+        await page.evaluate(() => { FileSystemFileHandle.prototype.getFile = globalThis.realGetFile; });
+      }
+      await ok('remove', { area, path: 'sizes' });
+    });
+
     it('explains a missing path', async () => {
       const reply = await run('list', { area, path: 'nope' });
       assert.equal(reply.ok, false);

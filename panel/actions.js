@@ -1,6 +1,6 @@
 // Toolbar actions: create, rename, delete, download, upload.
 import { call } from './transport.js';
-import { els, state, currentArea, setStatus, fail } from './state.js';
+import { els, state, currentArea, setStatus, fail, selectOnly } from './state.js';
 import { join, parentOf, baseName, formatSize, toBase64 } from './format.js';
 import { loadFolder, reloadExpanded, renderTree, updateButtons, showUsage } from './tree.js';
 import { showDetail, readAll } from './detail.js';
@@ -71,7 +71,7 @@ async function afterChange(message, selectPath, kind) {
   await reloadExpanded();
   if (selectPath !== undefined) {
     state.dirty = false;
-    state.selected = selectPath === null ? null : { path: selectPath, kind };
+    selectOnly(selectPath === null ? null : { path: selectPath, kind });
   }
   renderTree();
   updateButtons();
