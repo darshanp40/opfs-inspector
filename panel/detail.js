@@ -1,7 +1,7 @@
 // The card: the open item's header, tabs and views.
 import { call } from './transport.js';
 import { els, state, currentArea, setStatus, fail } from './state.js';
-import { baseName, formatSize, fromBase64 } from './format.js';
+import { baseName, formatSize, fromBase64, formatJson } from './format.js';
 import { renderTree, reloadExpanded, showUsage } from './tree.js';
 import { iconFor, typeOf } from './icons.js';
 import { getSettings, onSettingsChange } from './settings.js';
@@ -9,6 +9,8 @@ import { getSettings, onSettingsChange } from './settings.js';
 const TEXT_LIMIT = 2 * 1024 * 1024;
 const PREVIEW_BYTES = 4096;
 const SQLITE_HEADER = 'SQLite format 3\u0000';
+
+let openEditor = null; // the card's code editor, once it has loaded
 
 function meta(pairs) {
   const dl = document.createElement('dl');
@@ -237,6 +239,10 @@ export async function showDetail() {
 
 function drawCard(item) {
   state.sizeRun++;
+  if (openEditor) {
+    openEditor.destroy();
+    openEditor = null;
+  }
   // A calculation dropped by a redraw leaves no stale message.
   if (state.sizing) {
     state.sizing = false;
@@ -337,58 +343,88 @@ function note(text, isError = false) {
   return p;
 }
 
+// The editor loads on first use, so the panel opens without it.
 function editor(path, text) {
   const wrap = document.createDocumentFragment();
-  const area = document.createElement('textarea');
-  area.className = 'editor';
-  area.spellcheck = false;
-  area.value = text;
-  area.readOnly = !state.canWrite;
-  area.setAttribute('aria-label', `Contents of ${baseName(path)}`);
-  const save = document.createElement('button');
+  const name = baseName(path);
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  const host = document.createElement('div');
+  host.className = 'editor';
+  let ed = null;
+  const button = (label, cmd) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.dataset.cmd = cmd;
+    b.disabled = true;
+    return b;
+  };
+  const save = button('Save', 'save');
   save.className = 'primary';
-  save.dataset.cmd = 'save';
-  save.textContent = 'Save';
-  save.disabled = true;
-  const discard = document.createElement('button');
-  discard.textContent = 'Discard changes';
-  discard.dataset.cmd = 'discard';
-  discard.disabled = true;
+  const discard = button('Discard changes', 'discard');
   const hint = document.createElement('span');
   hint.className = 'note';
   hint.textContent = state.canWrite ? '' : 'This browser cannot change files from a page.';
-  area.addEventListener('input', () => {
-    state.dirty = area.value !== text;
+  const changed = (now) => {
+    state.dirty = now !== text;
     save.disabled = discard.disabled = !state.dirty;
-  });
+  };
   save.addEventListener('click', async () => {
     try {
-      await call('writeText', { area: currentArea(), path, text: area.value });
-      text = area.value;
-      state.dirty = false;
-      save.disabled = discard.disabled = true;
+      const now = ed.getText();
+      await call('writeText', { area: currentArea(), path, text: now });
+      text = now;
+      changed(ed.getText());
       await reloadExpanded();
       renderTree();
       showUsage();
-      setStatus(`Saved ${baseName(path)}.`, 'ok');
+      setStatus(`Saved ${name}.`, 'ok');
     } catch (error) {
       fail(error);
     }
   });
   discard.addEventListener('click', () => {
-    area.value = text;
-    state.dirty = false;
-    save.disabled = discard.disabled = true;
+    ed.setText(text);
     setStatus('');
   });
   const actions = document.createElement('div');
   actions.className = 'actions';
-  actions.append(save, discard, hint);
-  wrap.append(actions, area);
+  actions.append(save, discard);
+  if (ext === 'json') {
+    const format = button('Format JSON', 'format-json');
+    format.addEventListener('click', () => {
+      const { jsonIndent, sortKeys } = getSettings();
+      try {
+        ed.setText(formatJson(ed.getText(), { indent: jsonIndent, sortKeys }));
+        setStatus('Formatted the JSON.', 'ok');
+      } catch (error) {
+        fail(error);
+      }
+    });
+    actions.append(format);
+  }
+  actions.append(hint);
+  import('./editor.entry.js').then(({ createEditor }) => {
+    // The card was redrawn while it loaded.
+    if (!host.isConnected) return;
+    ed = openEditor = createEditor(host, {
+      text,
+      language: ext,
+      fontSize: getSettings().editorFontSize,
+      dark: document.documentElement.dataset.theme === 'dark',
+      label: `Contents of ${name}`,
+      readOnly: !state.canWrite,
+      onChange: changed,
+    });
+    const format = actions.querySelector('[data-cmd="format-json"]');
+    if (format) format.disabled = !state.canWrite;
+  }).catch(fail);
+  wrap.append(actions, host);
   return wrap;
 }
 
 // A changed setting shows on the open folder.
 onSettingsChange((now, before) => {
+  if (openEditor && now.editorFontSize !== before.editorFontSize) openEditor.setFontSize(now.editorFontSize);
   if (now.folderSize !== before.folderSize && state.selected && state.selected.kind === 'directory') showDetail();
 });

@@ -90,6 +90,10 @@ register({
   when: () => state.dirty, run: () => editorButton('save').click(),
 });
 register({ id: 'discard', label: 'Discard changes', keys: 'Mod+Shift+Z', scope: 'editor', typing: true, when: () => state.dirty, run: () => editorButton('discard').click() });
+register({
+  id: 'format-json', label: 'Format JSON', keys: 'Mod+Shift+F', scope: 'editor', typing: true,
+  when: () => !!editorButton('format-json') && !editorButton('format-json').disabled, run: () => editorButton('format-json').click(),
+});
 register({ id: 'select-all', label: 'Select all', keys: 'Mod+A', scope: 'tree', when: () => !!focusedItem(), run: selectAll });
 register({
   id: 'copy-path', label: 'Copy path', keys: 'Mod+Alt+C', menu: true, when: () => state.selection.size > 0,

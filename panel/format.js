@@ -30,3 +30,32 @@ export function toBase64(bytes) {
   }
   return btoa(binary);
 }
+
+// Pretty-prints JSON. Numbers keep their written form where the browser can
+// (JSON.rawJSON), so big integers are not rounded.
+// ponytail: integer-like keys still sort first, as in any JS object.
+export function formatJson(text, { indent = 2, sortKeys = false } = {}) {
+  let value;
+  try {
+    value = JSON.parse(text, (key, v, context) => {
+      if (typeof v === 'number' && context && JSON.rawJSON) return JSON.rawJSON(context.source);
+      if (sortKeys && v && typeof v === 'object' && !Array.isArray(v)) {
+        return Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]]));
+      }
+      return v;
+    });
+  } catch (error) {
+    // Chromium gives a position, Firefox a line and column.
+    const pos = /position (\d+)/.exec(error.message);
+    const lc = /line (\d+) column (\d+)/.exec(error.message);
+    let line;
+    let column;
+    if (!pos && lc) [line, column] = [Number(lc[1]), Number(lc[2])];
+    else {
+      const before = text.slice(0, pos ? Number(pos[1]) : text.length).split('\n');
+      [line, column] = [before.length, before[before.length - 1].length + 1];
+    }
+    throw new SyntaxError(`Invalid JSON at line ${line}, column ${column}.`);
+  }
+  return JSON.stringify(value, null, indent);
+}

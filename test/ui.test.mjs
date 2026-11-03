@@ -37,6 +37,29 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await page.locator('#card-body form button[type=submit]').click();
     }
 
+    // Runs formatJson in the page, so each engine's JSON.parse messages are covered.
+    const format = (text, options) => page.evaluate(async ({ text, options }) => {
+      const { formatJson } = await import('/panel/format.js');
+      try {
+        return formatJson(text, options);
+      } catch (error) {
+        return `${error.name}: ${error.message}`;
+      }
+    }, { text, options });
+
+    it('formatJson indents and sorts keys at every level, keeping array order', async () => {
+      assert.equal(await format('{"b":1,"a":[3,1]}', { indent: 2, sortKeys: true }), '{\n  "a": [\n    3,\n    1\n  ],\n  "b": 1\n}');
+    });
+
+    it('formatJson keeps numbers exactly as written', async () => {
+      assert.equal(await format('[12345678901234567890,1.0]', { indent: '\t', sortKeys: false }), '[\n\t12345678901234567890,\n\t1.0\n]');
+    });
+
+    it('formatJson throws a SyntaxError with the line and column', async () => {
+      assert.match(await format('{\n  "a": 1,\n}', { indent: 2 }), /^SyntaxError: .*line 3, column 1/);
+      assert.match(await format('{"a": ', { indent: 2 }), /^SyntaxError: .*line 1, column 7/);
+    });
+
     it('footer shows usage', async () => {
       await page.waitForFunction(() => document.getElementById('usage').textContent);
       assert.match(await page.locator('#usage').textContent(), /of/);
@@ -54,8 +77,9 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
 
     it('edits and saves a text file', async () => {
       await row('notes/todo.txt').click();
-      const editor = page.locator('textarea.editor');
+      const editor = page.locator('.cm-content');
       await editor.fill('buy milk');
+      assert.equal(await page.getByRole('button', { name: 'Save' }).isDisabled(), false);
       await page.getByRole('button', { name: 'Save' }).click();
       await page.waitForFunction(() => document.getElementById('status').textContent.includes('Saved'));
       const text = await page.evaluate(async () => {
@@ -68,7 +92,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
     });
 
     it('blocks leaving a file with unsaved changes', async () => {
-      await page.locator('textarea.editor').fill('changed');
+      await page.locator('.cm-content').fill('changed');
       await row('notes').click();
       assert.match(await status().textContent(), /Save or discard/);
       await page.getByRole('button', { name: 'Discard changes' }).click();
@@ -106,11 +130,25 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await row('dot.svg').click();
       await page.locator('#card-head', { hasText: 'dot.svg' }).waitFor();
       assert.deepEqual(await page.locator('#card-tabs [role=tab]').allTextContents(), ['Editor', 'Details']);
-      await page.locator('textarea.editor').fill('<svg/>');
+      await page.locator('.cm-content').fill('<svg/>');
       await page.getByRole('button', { name: 'Save' }).click();
       await page.waitForFunction(() => document.getElementById('status').textContent.includes('Saved dot.svg'));
       const text = await page.evaluate(async () => (await (await (await navigator.storage.getDirectory()).getFileHandle('dot.svg')).getFile()).text());
       assert.equal(text, '<svg/>');
+    });
+
+    it('JSON file shows highlighted tokens', async () => {
+      await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const writable = await (await root.getFileHandle('data.json', { create: true })).createWritable();
+        await writable.write('{"name": "x", "n": 1}');
+        await writable.close();
+      });
+      await page.click('#refresh');
+      await row('data.json').click();
+      await page.locator('.cm-editor').waitFor({ state: 'visible' });
+      await page.locator('.cm-content span[class*="tok-"]').first().waitFor();
+      assert.equal(await page.locator('.cm-content').getAttribute('aria-label'), 'Contents of data.json');
     });
 
     it('rows have type icons', async () => {
@@ -377,10 +415,10 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       const p = await freshPage(['n.txt']);
       await p.reload();
       await p.locator('.row[data-path="n.txt"]').click();
-      const editor = p.locator('textarea.editor');
+      const editor = p.locator('.cm-content');
       await editor.fill('hello');
       await editor.press('ControlOrMeta+a');
-      assert.equal(await p.evaluate(() => document.activeElement.selectionEnd - document.activeElement.selectionStart), 5);
+      assert.equal(await p.evaluate(() => getSelection().toString()), 'hello');
       assert.equal(await p.locator('#tree [aria-selected="true"]').count(), 1);
       await editor.press('ControlOrMeta+s');
       await p.waitForFunction(() => document.getElementById('status').textContent.includes('Saved'));
@@ -480,7 +518,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       assert.equal(await p.locator('#tree [aria-selected="true"]').count(), 1);
       await p.locator('#card-body form button', { hasText: 'Cancel' }).click();
       await p.locator('.row[data-path="a.txt"]').click();
-      const editor = p.locator('textarea.editor');
+      const editor = p.locator('.cm-content');
       await editor.fill('abc');
       for (const key of ['?', 'Backspace', 'Delete', 'ControlOrMeta+a', 'ControlOrMeta+d', 'ControlOrMeta+Backspace']) await editor.press(key);
       assert.equal(await p.locator('#help[open]').count(), 0);
@@ -494,14 +532,87 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       const p = await freshPage(['a.txt']);
       await p.reload();
       await p.locator('.row[data-path="a.txt"]').click();
-      const editor = p.locator('textarea.editor');
+      const editor = p.locator('.cm-content');
       await editor.fill('changed');
       assert.equal(await p.evaluate(() => document.querySelector('[data-cmd=discard]').disabled), false);
       await editor.press('ControlOrMeta+Shift+z');
-      assert.equal(await editor.inputValue(), '');
+      assert.equal(await editor.textContent(), '');
       assert.equal(await p.evaluate(() => document.querySelector('[data-cmd=discard]').disabled), true);
       await p.locator('.row[data-path="a.txt"]').click();
       assert.doesNotMatch(await p.locator('#status').textContent(), /Save or discard/);
+      await p.context().close();
+    });
+
+    it('Mod+Shift+F formats a JSON file with the settings and marks it dirty', async () => {
+      const p = await freshPage([]);
+      await p.evaluate(async () => {
+        localStorage.setItem('opfs-inspector:settings', JSON.stringify({ jsonIndent: 4, sortKeys: true }));
+        const w = await (await (await navigator.storage.getDirectory()).getFileHandle('a.json', { create: true })).createWritable();
+        await w.write('{"b":1,"a":2}');
+        await w.close();
+      });
+      await p.reload();
+      await p.locator('.row[data-path="a.json"]').click();
+      const editor = p.locator('.cm-content');
+      await editor.click();
+      await editor.press('ControlOrMeta+Shift+f');
+      await p.waitForFunction(() => document.getElementById('status').textContent.includes('Formatted'));
+      assert.equal(await editor.innerText(), '{\n    "a": 2,\n    "b": 1\n}');
+      assert.equal(await p.evaluate(() => document.querySelector('[data-cmd=save]').disabled), false);
+      await p.context().close();
+    });
+
+    it('invalid JSON shows the line and column in #status and leaves the text', async () => {
+      const p = await freshPage([]);
+      await p.evaluate(async () => {
+        const w = await (await (await navigator.storage.getDirectory()).getFileHandle('bad.json', { create: true })).createWritable();
+        await w.write('{\n  "a": 1,\n}');
+        await w.close();
+      });
+      await p.reload();
+      await p.locator('.row[data-path="bad.json"]').click();
+      const editor = p.locator('.cm-content');
+      await editor.click();
+      await editor.press('ControlOrMeta+Shift+f');
+      await p.waitForFunction(() => /line 3, column 1/.test(document.getElementById('status').textContent));
+      assert.equal(await editor.innerText(), '{\n  "a": 1,\n}');
+      assert.equal(await p.evaluate(() => document.querySelector('[data-cmd=save]').disabled), true);
+      await p.context().close();
+    });
+
+    it('Format JSON is offered only for a JSON file', async () => {
+      const p = await freshPage(['a.txt']);
+      await p.reload();
+      await p.locator('.row[data-path="a.txt"]').click();
+      await p.locator('.cm-editor').waitFor();
+      assert.equal(await p.locator('[data-cmd="format-json"]').count(), 0);
+      await p.context().close();
+    });
+
+    it('editor bundle loads only when a text file opens', async () => {
+      const p = await freshPage(['d/', 'a.txt']);
+      const requests = [];
+      p.on('request', (req) => requests.push(req.url()));
+      await p.reload();
+      await p.locator('.row[data-path="d"]').click();
+      await p.locator('#card-tabs [role=tab]').first().waitFor();
+      assert.deepEqual(requests.filter((u) => /editor/.test(u)), []);
+      await p.locator('.row[data-path="a.txt"]').click();
+      await p.locator('.cm-editor').waitFor();
+      assert.ok(requests.some((u) => /editor/.test(u)));
+      await p.context().close();
+    });
+
+    it('the editor font size follows the setting', async () => {
+      const p = await freshPage(['a.txt']);
+      await p.reload();
+      await p.locator('.row[data-path="a.txt"]').click();
+      await p.locator('.cm-editor').waitFor();
+      assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('.cm-content')).fontSize), '12px');
+      await p.click('#settings');
+      await p.getByLabel('Editor font size').fill('20');
+      await p.getByLabel('Editor font size').dispatchEvent('change');
+      assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('.cm-content')).fontSize), '20px');
       await p.context().close();
     });
 
@@ -512,7 +623,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.locator('.row[data-path="d"]').click();
       await p.keyboard.press('ArrowRight');
       await p.locator('.row[data-path="d/in.txt"]').click();
-      const editor = p.locator('textarea.editor');
+      const editor = p.locator('.cm-content');
       await editor.fill('keep me');
       await editor.press('ControlOrMeta+Alt+ArrowRight');
       assert.equal(await p.evaluate(() => document.activeElement.getAttribute('role')), 'tab');
@@ -520,7 +631,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.keyboard.press('ControlOrMeta+Alt+ArrowLeft');
       await p.keyboard.press('ControlOrMeta+Shift+ArrowLeft');
       await p.locator('.row[data-path="d/in.txt"]').waitFor({ state: 'detached' });
-      assert.equal(await editor.inputValue(), 'keep me');
+      assert.equal(await editor.innerText(), 'keep me');
       assert.equal(await p.evaluate(() => document.querySelector('[data-cmd=save]').disabled), false);
       await p.context().close();
     });
@@ -784,10 +895,10 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       assert.equal(await p.locator('#card-body .prompt').count(), 1);
       await r('b.txt').click();
       await p.locator('#card-head', { hasText: 'b.txt' }).waitFor();
-      await p.locator('textarea.editor').fill('keep me');
+      await p.locator('.cm-content').fill('keep me');
       await p.locator('#card-body button.danger', { hasText: 'Delete' }).click();
       assert.match(await p.locator('#status').textContent(), /Save or discard/);
-      assert.equal(await p.locator('textarea.editor').inputValue(), 'keep me');
+      assert.equal(await p.locator('.cm-content').innerText(), 'keep me');
       assert.deepEqual(await opfsFiles(p), ['a.txt', 'b.txt']);
       await p.context().close();
     });
@@ -1058,6 +1169,7 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
         for (const path of ['readme.md', 'app.db', 'empty']) {
           await row(path).click();
           await page.locator('#card-tabs [role=tab]').first().waitFor();
+          if (path === 'readme.md') await page.locator('.cm-editor').waitFor();
           await page.waitForFunction(() => /of|not available/.test(document.getElementById('usage').textContent));
           const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
           const bad = violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');

@@ -24,6 +24,11 @@
   --i-image: #2b8a3e;
   --i-sqlite: #0f8a8a;
   --i-file: #6b7489;
+  --t-keyword: #7a1fb8;
+  --t-string: #1d6b2e;
+  --t-number: #9a4600;
+  --t-property: #0b55b5;
+  --t-type: #7d5200;
   font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 :root[data-theme="dark"] {
@@ -51,6 +56,11 @@
   --i-image: #6fcf86;
   --i-sqlite: #4fd1c5;
   --i-file: #9ea7b8;
+  --t-keyword: #d19bff;
+  --t-string: #9fd89f;
+  --t-number: #f0b070;
+  --t-property: #8fb8ff;
+  --t-type: #f0c674;
 }
 
 * { box-sizing: border-box; }
@@ -145,7 +155,20 @@ svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; s
 dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
 dl.meta dt { color: var(--muted); }
 dl.meta dd { margin: 0; overflow-wrap: anywhere; }
-textarea.editor { flex: 1; min-height: 200px; width: 100%; resize: none; padding: 10px 12px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.editor { flex: 1; min-height: 200px; display: flex; flex-direction: column; }
+.editor .cm-editor { flex: 1; min-height: 0; }
+/* Syntax colours, all at least 4.5:1 on the editor, active line and selection. */
+.tok-keyword { color: var(--t-keyword); }
+.tok-string, .tok-string2 { color: var(--t-string); }
+.tok-number, .tok-bool, .tok-atom, .tok-literal { color: var(--t-number); }
+.tok-propertyName { color: var(--t-property); }
+.tok-typeName, .tok-className, .tok-namespace { color: var(--t-type); }
+.tok-comment, .tok-meta { color: var(--muted); font-style: italic; }
+.tok-heading { color: var(--accent); font-weight: 700; }
+.tok-link, .tok-url { color: var(--accent); text-decoration: underline; }
+.tok-emphasis { font-style: italic; }
+.tok-strong { font-weight: 700; }
+.tok-invalid { color: var(--error); }
 pre.hex { margin: 0; padding: 10px 12px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
 pre.hex .off, pre.hex .ascii { color: var(--muted); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -176,6 +199,11 @@ meter::-moz-meter-bar { border-radius: 3px; background: var(--accent-fill); }
   .icon { color: CanvasText; }
   .icon-button svg, .pill svg { color: ButtonText; }
   meter { appearance: auto; border: 1px solid CanvasText; }
+  /* The editor draws its own selection and cursor, which forced colours would hide. */
+  .cm-editor { border-color: CanvasText !important; }
+  .cm-editor.cm-focused { outline: 2px solid Highlight !important; }
+  .cm-selectionBackground { forced-color-adjust: none; background: Highlight !important; }
+  .cm-cursor { forced-color-adjust: none; border-left-color: CanvasText !important; }
 }
 
 /* Right-click menu and shortcut help. */

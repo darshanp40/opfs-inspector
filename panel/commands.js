@@ -64,7 +64,7 @@ function matches(k, event) {
 
 const inScope = (scope) => {
   const active = document.activeElement;
-  const inEditor = active && active.matches('textarea.editor');
+  const inEditor = !!active && active.closest('.cm-editor') !== null;
   if (scope === 'tree') return !!active && active.closest('#tree') !== null;
   if (scope === 'editor') return inEditor;
   if (scope === '!editor') return !inEditor;
