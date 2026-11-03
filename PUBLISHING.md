@@ -16,18 +16,25 @@ When you change the code, click the reload icon on the extension's card, then cl
 npm run package
 ```
 
-This makes `dist/opfs-inspector-<version>.zip` with only the files the browser needs. Raise `version` in `manifest.json` (and `package.json`) for each new upload; a store refuses a version it already has.
+This makes `dist/opfs-inspector-<version>.zip` with only the files the browser needs. The code is minified and has no source maps.
+
+For each new upload, raise the version first. A store refuses a version it already has.
+
+1. Set `version` in `manifest.json`.
+2. Run `npm version <new version> --no-git-tag-version`. This sets the same version in `package.json` and `package-lock.json`.
+3. Run `npm run package` and check the zip name has the new version.
 
 ## 3. What every store asks for
 
 - **Description**: the first paragraph of the README works.
 - **Ready-made listing text and images**: [store/listing.md](store/listing.md). `node scripts/store-images.mjs` remakes the promo tile and logo.
-- **Screenshots**: at least one of the panel in use, 1280×800 or 640×400 for Chrome.
+- **Screenshots**: at least one of the panel in use, 1280×800 or 640×400 for Chrome, with no alpha channel. `node scripts/screenshots.mjs` remakes the ones in `docs/`.
 - **Icon**: 128×128, from `icons/icon-128.png`. A more polished icon is worth making before a public listing.
-- **Privacy**: the extension collects no data and sends nothing anywhere. Where a store asks for a privacy policy, link to [PRIVACY.md](PRIVACY.md).
+- **Privacy**: the extension collects no data and sends nothing anywhere. It keeps only the panel settings, in its own storage. Where a store asks for a privacy policy, link to [PRIVACY.md](PRIVACY.md).
 - **Permission reasons**, which reviewers read:
   - `scripting`: to add a small listener to the inspected page, only when the developer tools panel is opened for it, so the panel can read and change that page's OPFS files.
   - Access to all sites (`<all_urls>`): the panel can be opened on any site, and OPFS can only be read from inside the site's own page.
+  - WebAssembly (`'wasm-unsafe-eval'`): only for the SQLite viewer, which runs the SQLite engine from the package. No remote code.
 
 ## 4. Chrome Web Store
 

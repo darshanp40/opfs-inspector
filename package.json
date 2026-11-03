@@ -1,6 +1,6 @@
 {
   "name": "opfs-inspector",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Browse and edit a site's origin private file system, including Storage Buckets, from the developer tools.",
   "license": "MIT",

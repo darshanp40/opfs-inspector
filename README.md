@@ -1,23 +1,35 @@
 # OPFS Inspector
 
-A developer tools panel for the [origin private file system](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) (OPFS) of the page you are inspecting. It shows the default storage and every [Storage Bucket](https://wicg.github.io/storage-buckets/) of the site, and lets you create, rename, edit, delete, upload and download files.
+A developer tools panel for the [origin private file system](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) (OPFS) of the page you are inspecting. It shows the default storage and every [Storage Bucket](https://wicg.github.io/storage-buckets/) of the site. You can browse, edit, preview, move and download files, and look inside SQLite databases.
 
 ![Editing a JSON file in the default storage](docs/editor.png)
 
+![A SQLite table inside a Storage Bucket](docs/sqlite.png)
+
+![An image preview](docs/image.png)
+
 ![Picking a Storage Bucket](docs/picker.png)
 
-![A SQLite database inside a Storage Bucket](docs/bucket.png)
-
-![The panel in dark mode](docs/dark.png)
+![A Markdown preview in dark mode](docs/dark.png)
 
 ## What it does
 
+New in 0.2.0: a new look, a keyboard tree, a real code editor, previews, and a SQLite viewer.
+
 - **Storage picker.** Default storage, plus each bucket from `navigator.storageBuckets.keys()` where the browser has Storage Buckets (Chromium-based browsers). A bucket is only opened if it exists, so the panel never creates one.
-- **Folder tree.** Folders are read one at a time, when you open them. Only that folder's files are read, for their size and date.
-- **Text editor** for UTF-8 files up to 2 MB, with Save and Discard. You cannot leave a file with unsaved changes.
-- **Byte view** for other files, with SQLite databases marked as such.
-- **New file, new folder, rename, delete, upload, download.** Delete asks first. Upload skips names that already exist.
+- **File tree.** Folders are read one at a time, when you open them. Each file has a type icon. Use the arrow keys to move, and Ctrl/Cmd+click or Shift+click to pick several items. Large folders stay fast. A path bar shows where you are.
+- **Editor** for UTF-8 files up to 2 MB, with syntax colours for JSON, JavaScript, CSS, HTML, Markdown and SQL. Save, Discard and Format JSON. You cannot leave a file with unsaved changes.
+- **Previews.** Images, with zoom and rotate. Markdown, shown safely, with no scripts and no outside requests.
+- **SQLite viewer.** Open a database file to see its tables, page through rows, and run read-only queries. It works on a copy taken in memory, including changes still in the `-wal` file. It never writes to the site's files.
+- **File actions.** New file, new folder, rename, duplicate, delete, upload and download. Drag items onto a folder to move them, or use **Move to**. Drop files or folders from your computer to upload them. Several items download as one zip.
+- **Folder sizes and storage details**, including how much each bucket uses.
+- **Keyboard shortcuts and menus.** Right-click an item for its menu. Press `?` to see every shortcut.
+- **Settings** for the JSON indent, key sorting, folder sizes and the editor font size.
 - **Clear errors**, for example when a database has a file open, or when the browser lost track of the site's files after its data was deleted.
+
+### What it does not read
+
+The SQLite viewer reads plain database files, meaning files that start with the SQLite header. It does not read pool layouts, such as `opfs-sahpool` from the official SQLite build or wa-sqlite's `AccessHandlePoolVFS`. It does not read databases kept in IndexedDB either. Those files show as bytes.
 
 ## How it keeps the page light
 
@@ -65,7 +77,7 @@ npm test
 
 - `test/ops.test.mjs`: every file operation, in Chromium, Firefox and WebKit.
 - `test/ui.test.mjs`: the panel, clicked through like a person, in Chromium and Firefox.
-- `test/extension.test.mjs`: the unpacked extension loaded into Chromium and Microsoft Edge, working on a real page's files and bucket. Needs Edge installed; set `ENGINES=chromium` to skip it.
+- `test/extension.test.mjs`: the unpacked extension loaded into Chromium and Microsoft Edge, working on a real page's files and bucket: the editor, the SQLite viewer, drag to move, and some shortcuts. Needs Edge installed; set `ENGINES=chromium` to skip it.
 
 WebKit in Playwright has no working OPFS, so its tests are skipped with the reason. Safari itself has to be checked by hand.
 
@@ -80,7 +92,9 @@ WebKit in Playwright has no working OPFS, so its tests are skipped with the reas
 - `src/background.js`: adds the agent to the page when needed and passes messages.
 - `panel.html`, `panel.css`: the panel page.
 - `panel/`: the panel source, split into modules. `main.js` starts it.
-- `scripts/build.mjs`: bundles `panel/` into `build/` with esbuild. `build/` is git-ignored.
+- `scripts/build.mjs`: bundles and minifies `panel/` into `build/` with esbuild. `build/` is git-ignored.
+- `build/sql-wasm.wasm`: the SQLite engine (sql.js), used only by the SQLite viewer.
+- `build/THIRD_PARTY.txt`: the licences of the libraries bundled into `build/`.
 - `devtools.html`, `devtools.js`: registers the panel.
 
 ## License

@@ -1,4 +1,5 @@
-// Bundles the panel into build/. Page code in src/ is not bundled.
+// Bundles the panel into build/, minified and with no source maps. Page code in
+// src/ is not bundled.
 import { build } from 'esbuild';
 import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -16,6 +17,7 @@ const result = await build({
   splitting: true,
   format: 'esm',
   target: 'es2022',
+  minify: true,
   metafile: true,
   logLevel: 'warning',
 });
@@ -25,6 +27,7 @@ const worker = await build({
   bundle: true,
   format: 'esm',
   target: 'es2022',
+  minify: true,
   metafile: true,
   logLevel: 'warning',
 });
