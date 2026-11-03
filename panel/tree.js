@@ -319,7 +319,8 @@ els.tree.addEventListener('keydown', (event) => {
 });
 
 // Drag and drop. Rows dragged onto a folder move there. Files from the
-// computer go into the folder they are dropped on, or the selected folder.
+// computer go into the folder they are dropped on, the folder of the file
+// they are dropped on, or else the selected folder.
 let dragged = null; // items being dragged from the tree
 let marked = null;
 let refusal = null; // why the row under the pointer takes no drop
@@ -341,7 +342,7 @@ function dropAt(event) {
   }
   if (!event.dataTransfer || ![...event.dataTransfer.types].includes('Files')) return { ok: false, el: null };
   if (!state.canWrite) return { ok: false, why: 'This browser cannot change files from a page.', el };
-  if (item && item.kind === 'directory') return { folder: item.path, ok: true, el };
+  if (item) return { folder: item.kind === 'directory' ? item.path : parentOf(item.path), ok: true, el };
   return { folder: undefined, ok: true, el: els.tree };
 }
 

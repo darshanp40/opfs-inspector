@@ -993,6 +993,30 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.context().close();
     });
 
+    it('a file dropped on a file row goes into that file\'s folder', async () => {
+      const p = await freshPage(['a.txt'], 'y');
+      await p.evaluate(async () => (await navigator.storage.getDirectory()).getDirectoryHandle('z', { create: true }));
+      await p.reload();
+      await p.locator('.row[data-path="y"]').click();
+      await p.keyboard.press('ArrowRight');
+      await p.locator('.row[data-path="y/a.txt"]').waitFor();
+      await p.locator('.row[data-path="z"]').click();
+      await p.evaluate(() => {
+        const dt = new DataTransfer();
+        dt.items.add(new File(['x'], 'new.txt'));
+        const row = document.querySelector('.row[data-path="y/a.txt"]');
+        for (const type of ['dragenter', 'dragover', 'drop']) row.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+      });
+      await p.waitForFunction(() => /Uploaded/.test(document.getElementById('status').textContent));
+      const where = await p.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const has = (dir) => dir.getFileHandle('new.txt').then(() => true, () => false);
+        return { y: await has(await root.getDirectoryHandle('y')), z: await has(await root.getDirectoryHandle('z')) };
+      });
+      assert.deepEqual(where, { y: true, z: false });
+      await p.context().close();
+    });
+
     it('dropping a folder from the computer keeps its structure', async () => {
       const p = await freshPage([]);
       await p.reload();
