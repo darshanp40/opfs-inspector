@@ -51,6 +51,13 @@ await row('drafts.db').click();
 await page.locator('pre.hex').waitFor();
 await page.screenshot({ path: 'docs/bucket.png' });
 
+await page.emulateMedia({ colorScheme: 'dark' });
+await page.reload();
+await row('settings').dblclick();
+await row('settings/notes.md').click();
+await page.locator('textarea.editor').waitFor();
+await page.screenshot({ path: 'docs/dark.png' });
+
 await browser.close();
 server.closeAllConnections();
 server.close();

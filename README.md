@@ -6,6 +6,8 @@ A developer tools panel for the [origin private file system](https://developer.m
 
 ![A SQLite database inside a Storage Bucket](docs/bucket.png)
 
+![The panel in dark mode](docs/dark.png)
+
 ## What it does
 
 - **Storage picker.** Default storage, plus each bucket from `navigator.storageBuckets.keys()` where the browser has Storage Buckets (Chromium-based browsers). A bucket is only opened if it exists, so the panel never creates one.
