@@ -851,6 +851,67 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.context().close();
     });
 
+    const ENDLESS = 'with recursive c(x) as (select 1 union all select x + 1 from c) select count(*) from c';
+
+    it('Cancel stops a query that never ends, and the next query works', async () => {
+      const p = await freshPage([]);
+      await putDb(p);
+      await p.reload();
+      await p.locator('.row[data-path="app.db"]').click();
+      await p.getByRole('tab', { name: 'Query' }).click();
+      const editor = p.locator('.query-editor .cm-content');
+      await editor.fill(ENDLESS);
+      await p.getByRole('button', { name: 'Run', exact: true }).click();
+      await p.getByRole('button', { name: 'Cancel query' }).focus();
+      await p.keyboard.press('Enter');
+      await p.locator('.sql-result', { hasText: 'Cancelled the query.' }).waitFor();
+      assert.equal(await p.getByRole('button', { name: 'Cancel query' }).isVisible(), false);
+      assert.equal(await p.evaluate(() => document.activeElement.textContent), 'Run');
+      await editor.fill('select count(*) from t');
+      await editor.press('ControlOrMeta+Enter');
+      await p.locator('.sql-result .grid td', { hasText: '250' }).waitFor();
+      // The table tab works on the same snapshot too.
+      await p.getByRole('tab', { name: 'Table' }).click();
+      await p.locator('.sql-view .count', { hasText: /of 250/ }).waitFor();
+      await p.context().close();
+    });
+
+    it('a query that runs too long is stopped with a message', async () => {
+      const p = await freshPage([]);
+      await putDb(p);
+      await p.clock.install();
+      await p.reload();
+      await p.locator('.row[data-path="app.db"]').click();
+      await p.getByRole('tab', { name: 'Query' }).click();
+      const editor = p.locator('.query-editor .cm-content');
+      await editor.fill(ENDLESS);
+      await p.getByRole('button', { name: 'Run', exact: true }).click();
+      await p.getByRole('button', { name: 'Cancel query' }).waitFor();
+      await p.clock.runFor(31_000);
+      await p.locator('.sql-result .note.error', { hasText: /ran for over 30 seconds/ }).waitFor();
+      await editor.fill('select count(*) from t');
+      await editor.press('ControlOrMeta+Enter');
+      await p.locator('.sql-result .grid td', { hasText: '250' }).waitFor();
+      await p.context().close();
+    });
+
+    it('Reload snapshot works while a query is running', async () => {
+      const p = await freshPage([]);
+      await putDb(p);
+      await p.reload();
+      await p.locator('.row[data-path="app.db"]').click();
+      await p.getByRole('tab', { name: 'Query' }).click();
+      const editor = p.locator('.query-editor .cm-content');
+      await editor.fill(ENDLESS);
+      await p.getByRole('button', { name: 'Run', exact: true }).click();
+      await p.locator('.sql-result', { hasText: 'Running' }).waitFor();
+      await p.getByRole('button', { name: 'Reload snapshot' }).click();
+      await p.locator('.snap', { hasText: 'Snapshot taken' }).waitFor();
+      await p.getByRole('tab', { name: 'Table' }).click();
+      await p.locator('.sql-view .count', { hasText: /of 250/ }).waitFor({ timeout: 10_000 });
+      await p.context().close();
+    });
+
     it('sqlite bundle and wasm load only on first open', async () => {
       const p = await freshPage(['a.txt']);
       await putDb(p);

@@ -73,7 +73,13 @@ const handlers = {
   },
 };
 
-self.onmessage = async ({ data: { id, type, ...args } }) => {
+// Messages run one after another, so an open finishes before the next call.
+let last = Promise.resolve();
+self.onmessage = ({ data }) => {
+  last = last.then(() => handle(data));
+};
+
+async function handle({ id, type, ...args }) {
   try {
     if (type !== 'open' && !db) throw new Error('No database is open.');
     const value = await handlers[type](args);
@@ -81,4 +87,4 @@ self.onmessage = async ({ data: { id, type, ...args } }) => {
   } catch (error) {
     self.postMessage({ id, ok: false, error: error.message || String(error) });
   }
-};
+}

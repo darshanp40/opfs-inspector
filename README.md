@@ -20,7 +20,7 @@ New in 0.2.0: a new look, a keyboard tree, a real code editor, previews, and a S
 - **File tree.** Folders are read one at a time, when you open them. Each file has a type icon. Use the arrow keys to move, and Ctrl/Cmd+click or Shift+click to pick several items. Large folders stay fast. A path bar shows where you are.
 - **Editor** for UTF-8 files up to 2 MB, with syntax colours for JSON, JavaScript, CSS, HTML, Markdown and SQL. Save, Discard and Format JSON. Format JSON keeps every number exactly as written. Firefox before version 135 cannot do this, so there it will not format a file if a number would change. You cannot leave a file with unsaved changes.
 - **Previews.** Images, with zoom and rotate. Markdown, shown safely, with no scripts and no outside requests.
-- **SQLite viewer.** Open a database file to see its tables, page through rows, and run read-only queries. It works on a copy taken in memory, including changes still in the `-wal` file. It never writes to the site's files.
+- **SQLite viewer.** Open a database file to see its tables, page through rows, and run read-only queries. It works on a copy taken in memory, including changes still in the `-wal` file. A query that takes too long can be cancelled, and it stops by itself after 30 seconds. It never writes to the site's files.
 - **File actions.** New file, new folder, rename, duplicate, delete, upload and download. Drag items onto a folder to move them, or use **Move to**. Drop files or folders from your computer to upload them. Several items download as one zip.
 - **Folder sizes and storage details**, including how much each bucket uses.
 - **Keyboard shortcuts and menus.** Right-click an item for its menu. Press `?` to see every shortcut.

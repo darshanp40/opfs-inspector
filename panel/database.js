@@ -11,12 +11,34 @@ import { download } from './actions.js';
 const PAGE = 100;
 const PROGRESS_FROM = 5 * 1024 * 1024;
 
+const QUERY_LIMIT = 30_000;
+
 let worker = null;
 let nextId = 1;
 const waiting = new Map();
+// The open snapshot's bytes, so a new worker can open it again.
+// ponytail: keeps a second copy in the panel, up to the 200 MB limit.
+let openBytes = null;
+
+// Ends the worker and fails what waits on it. The next call starts a new one.
+function stopWorker(message) {
+  if (!worker) return;
+  worker.terminate();
+  worker = null;
+  for (const reply of waiting.values()) reply.reject(new Error(message));
+  waiting.clear();
+}
+
+function send(type, args) {
+  const id = nextId++;
+  return new Promise((resolve, reject) => {
+    waiting.set(id, { resolve, reject });
+    worker.postMessage({ id, type, ...args });
+  });
+}
 
 // Sends one message to the worker and resolves to its value.
-function ask(type, args = {}, transfer = []) {
+function ask(type, args = {}) {
   if (!worker) {
     worker = new Worker(new URL('sqlite.js', import.meta.url), { type: 'module' });
     worker.onmessage = ({ data }) => {
@@ -26,19 +48,12 @@ function ask(type, args = {}, transfer = []) {
       if (data.ok) reply.resolve(data.value);
       else reply.reject(new Error(data.error));
     };
-    // A worker that fails is started again on the next call.
-    worker.onerror = () => {
-      for (const reply of waiting.values()) reply.reject(new Error('SQLite stopped. Try Reload snapshot.'));
-      waiting.clear();
-      worker.terminate();
-      worker = null;
-    };
+    worker.onerror = () => stopWorker('SQLite stopped. Try Reload snapshot.');
+    // The worker runs messages in order, so this opens before the call below.
+    if (type !== 'open' && openBytes) send('open', { bytes: openBytes }).catch(() => {});
   }
-  const id = nextId++;
-  return new Promise((resolve, reject) => {
-    waiting.set(id, { resolve, reject });
-    worker.postMessage({ id, type, ...args }, transfer);
-  });
+  if (type === 'open') openBytes = args.bytes;
+  return send(type, args);
 }
 
 let current = null; // the snapshot of the database on the card
@@ -47,6 +62,7 @@ let queryEditor = null;
 // Called when the card is drawn again.
 export function closeSqlite() {
   current = null;
+  openBytes = null;
   if (queryEditor) {
     queryEditor.destroy();
     queryEditor = null;
@@ -90,6 +106,8 @@ function session(item) {
 
 function load(s) {
   const run = ++s.run;
+  // A long query must not hold up the new snapshot.
+  if (waiting.size) stopWorker('Stopped, as a new snapshot was taken.');
   const live = () => s === current && run === s.run;
   s.say('Taking a snapshot…');
   s.ready = takeSnapshot(s.area, s.item.path, {
@@ -99,7 +117,7 @@ function load(s) {
   }).then(async ({ db, takenAt, walApplied }) => {
     // A newer snapshot, or another database, owns the worker now.
     if (!live()) return;
-    await ask('open', { bytes: db }, [db.buffer]);
+    await ask('open', { bytes: db });
     if (live()) s.say(`Snapshot taken ${new Date(takenAt).toLocaleTimeString()}${walApplied ? ', with the -wal file' : ''}`);
   });
   s.ready.catch((error) => {
@@ -249,10 +267,12 @@ export function queryView(item) {
   runButton.className = 'primary';
   runButton.dataset.cmd = 'run-query';
   runButton.disabled = true;
+  const cancel = button('Cancel query', () => stopWorker('Cancelled the query.'));
+  cancel.hidden = true;
   const hint = note('One statement at a time, read-only.');
   const tools = document.createElement('div');
   tools.className = 'actions';
-  tools.append(runButton, hint);
+  tools.append(runButton, cancel, hint);
   const host = document.createElement('div');
   host.className = 'editor query-editor';
   const result = document.createElement('div');
@@ -266,6 +286,10 @@ export function queryView(item) {
       if (box.isConnected) result.replaceChildren(note('There is no snapshot to query. Try Reload snapshot.', true));
       return;
     }
+    // Only one query at a time. A query that never ends stops the worker.
+    runButton.disabled = true;
+    cancel.hidden = false;
+    const timer = setTimeout(() => stopWorker(`The query ran for over ${QUERY_LIMIT / 1000} seconds, so it was stopped.`), QUERY_LIMIT);
     try {
       const r = await ask('query', { sql: queryEditor.getText() });
       if (!box.isConnected) return;
@@ -280,8 +304,16 @@ export function queryView(item) {
       setStatus(summary, 'ok');
     } catch (error) {
       if (!box.isConnected) return;
-      result.replaceChildren(note(error.message, true));
-      fail(error);
+      const cancelled = error.message === 'Cancelled the query.';
+      result.replaceChildren(note(error.message, !cancelled));
+      if (cancelled) setStatus(error.message);
+      else fail(error);
+    } finally {
+      clearTimeout(timer);
+      const hadFocus = document.activeElement === cancel;
+      runButton.disabled = false;
+      cancel.hidden = true;
+      if (hadFocus) runButton.focus();
     }
   }
 
