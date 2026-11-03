@@ -13,7 +13,7 @@ Browse and edit a site's origin private file system, including Storage Buckets, 
 
 **Description:**
 
-OPFS Inspector adds an OPFS Inspector tab to the developer tools. It shows the origin private file system of the page you are inspecting, including every Storage Bucket in Chrome and Edge.
+OPFS Inspector adds a tab to the developer tools. It shows the origin private file system of the page you are inspecting, including every Storage Bucket in Chrome and Edge.
 
 - Pick the default storage or any Storage Bucket of the site.
 - Browse folders one at a time.
