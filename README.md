@@ -29,7 +29,7 @@ New in 0.2.0: a new look, a keyboard tree, a real code editor, previews, and a S
 
 ### What it does not read
 
-The SQLite viewer reads plain database files, meaning files that start with the SQLite header. It does not read pool layouts, such as `opfs-sahpool` from the official SQLite build or wa-sqlite's `AccessHandlePoolVFS`. It does not read databases kept in IndexedDB either. Those files show as bytes. If a site uses `journal_mode` MEMORY or OFF together with exclusive locking, the viewer cannot fully check a copy taken while the site was writing. If the data looks wrong, use **Reload snapshot**.
+The SQLite viewer reads plain database files, meaning files that start with the SQLite header. It does not read pool layouts, such as `opfs-sahpool` from the official SQLite build or wa-sqlite's `AccessHandlePoolVFS`. It does not read databases kept in IndexedDB either. Those files show as bytes. If a site uses `journal_mode` MEMORY or OFF, the viewer cannot fully check a copy taken while the site was writing. If the data looks wrong, use **Reload snapshot**.
 
 ## How it keeps the page light
 

@@ -8,8 +8,8 @@
 // - a -journal is hot before, between or after the reads, as a commit is
 //   still writing pages (it may spill pages before it commits), or
 // - the database header (with its change counter) differs before and after.
-// ponytail: journal_mode=memory or off with exclusive locking leaves neither
-// sign, so a commit timed exactly around both reads is not seen.
+// ponytail: with journal_mode=memory or off there is no -journal, so a copy
+// taken while the site writes cannot be fully checked. Reload snapshot helps.
 import { call } from './transport.js';
 import { fromBase64 } from './format.js';
 import { applyWal } from './wal.js';
