@@ -207,3 +207,14 @@ dialog form { align-self: flex-end; margin: 0; }
   .row.drop-target, .tree.drop-target { outline: 2px solid Highlight; }
   .row.drop-refused, .tree.drop-refused { outline: 2px dashed GrayText; }
 }
+
+/* Folder size, settings and storage details. */
+.link-button { display: inline-flex; align-items: center; padding: 2px 6px; border: 0; background: none; color: var(--accent); }
+.link-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
+.settings-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
+.settings-grid input[type=checkbox] { justify-self: start; }
+.size-result { margin-top: 8px; }
+#storage-dialog td { font-variant-numeric: tabular-nums; }
+@media (forced-colors: active) {
+  .link-button { border: 1px solid ButtonText; color: ButtonText; }
+}

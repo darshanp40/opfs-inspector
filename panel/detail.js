@@ -4,6 +4,7 @@ import { els, state, currentArea, setStatus, fail } from './state.js';
 import { baseName, formatSize, fromBase64 } from './format.js';
 import { renderTree, reloadExpanded, showUsage } from './tree.js';
 import { iconFor, typeOf } from './icons.js';
+import { getSettings, onSettingsChange } from './settings.js';
 
 const TEXT_LIMIT = 2 * 1024 * 1024;
 const PREVIEW_BYTES = 4096;
@@ -103,7 +104,7 @@ export const TABS = {
         ['Folder', `/${item.path}`],
         ['Storage', storage],
         ['Contains', list ? itemCount(list.length) : 'Expand the folder to list it'],
-      ]));
+      ]), sizeTools(item.path));
     } else if (item.error) {
       wrap.append(meta([['File', `/${item.path}`], ['Storage', storage]]), note(item.error, true));
     } else {
@@ -124,6 +125,69 @@ export function tabsFor(type) {
   // Until a type's own views exist, show its bytes.
   if (type !== 'folder' && names.length === 1) names.unshift('Bytes');
   return names;
+}
+
+// Buttons that add up a folder's size. The first uses the folderSize setting.
+// Only the newest run, and only until Cancel or a redraw, may draw.
+function sizeTools(path) {
+  const box = document.createElement('div');
+  box.className = 'size-box';
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const result = document.createElement('div');
+  const button = (label, recursive, cmd) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (cmd) b.dataset.cmd = cmd;
+    b.addEventListener('click', () => run(recursive));
+    return b;
+  };
+  const recursive = getSettings().folderSize === 'recursive';
+  const main = button('Calculate size', recursive, 'folder-size');
+  const other = button(recursive ? 'Calculate this folder only' : 'Calculate with subfolders', !recursive);
+  const cancel = document.createElement('button');
+  cancel.textContent = 'Cancel';
+  cancel.hidden = true;
+  cancel.addEventListener('click', () => {
+    state.sizeRun++;
+    finish();
+    setStatus('Cancelled the size calculation.');
+    main.focus();
+  });
+  const finish = () => {
+    cancel.hidden = true;
+    main.disabled = other.disabled = false;
+  };
+  async function run(deep) {
+    const token = ++state.sizeRun;
+    result.replaceChildren();
+    cancel.hidden = false;
+    main.disabled = other.disabled = true;
+    cancel.focus();
+    setStatus('Calculating the size…');
+    try {
+      const { bytes, files, folders } = await call('dirSize', { area: currentArea(), path, recursive: deep });
+      if (token !== state.sizeRun) return;
+      const list = meta([
+        ['Size', `${formatSize(bytes)} (${bytes.toLocaleString()} bytes)`],
+        ['Files', String(files)],
+        ['Folders', String(folders)],
+      ]);
+      list.classList.add('size-result');
+      result.replaceChildren(list);
+      setStatus(`${formatSize(bytes)} in ${files} file${files === 1 ? '' : 's'}, ${folders} folder${folders === 1 ? '' : 's'}${deep ? ', with subfolders' : ''}.`, 'ok');
+      finish();
+      main.focus();
+    } catch (error) {
+      if (token !== state.sizeRun) return;
+      finish();
+      main.focus();
+      fail(error);
+    }
+  }
+  actions.append(main, other, cancel);
+  box.append(actions, result);
+  return box;
 }
 
 const itemCount = (n) => `${n} item${n === 1 ? '' : 's'}`;
@@ -170,6 +234,7 @@ export async function showDetail() {
 }
 
 function drawCard(item) {
+  state.sizeRun++;
   // An open question from an action stays, or its answer would never come.
   // Removed one by one, so the question keeps focus.
   for (const node of [...els.cardBody.childNodes]) if (!node.classList || !node.classList.contains('prompt')) node.remove();
@@ -315,3 +380,8 @@ function editor(path, text) {
   wrap.append(actions, area);
   return wrap;
 }
+
+// A changed setting shows on the open folder.
+onSettingsChange(() => {
+  if (state.selected && state.selected.kind === 'directory') showDetail();
+});

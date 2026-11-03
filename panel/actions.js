@@ -343,3 +343,27 @@ export async function upload(list, folder = targetFolder()) {
     els.status.className = 'status error';
   }
 }
+
+// Usage and quota for the default storage and each bucket.
+export async function openStorage() {
+  const dialog = document.getElementById('storage-dialog');
+  const body = dialog.querySelector('tbody');
+  const row = (name, used, quota) => {
+    const tr = document.createElement('tr');
+    for (const text of [name, used, quota]) tr.append(Object.assign(document.createElement('td'), { textContent: text }));
+    return tr;
+  };
+  body.replaceChildren(row('Loading…', '', ''));
+  dialog.showModal();
+  const rows = await Promise.all(state.areas.map(async (a) => {
+    try {
+      const { usage, quota } = await call('estimate', { area: a.area });
+      if (usage == null || !quota) return row(a.label, 'Not available', 'Not available');
+      return row(a.label, `${formatSize(usage)} (${((usage / quota) * 100).toFixed(usage / quota < 0.01 ? 2 : 0)}% of quota)`, formatSize(quota));
+    } catch {
+      return row(a.label, 'Not available', 'Not available');
+    }
+  }));
+  body.replaceChildren(...rows);
+  setStatus(`Storage details: ${rows.length} storage${rows.length === 1 ? '' : 's'}.`);
+}

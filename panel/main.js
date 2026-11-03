@@ -3,9 +3,10 @@ import { onNavigated } from './transport.js';
 import { applyTheme } from './theme.js';
 import { els, state, setStatus, selectOnly } from './state.js';
 import { refresh, updateButtons, focusedItem, selectAll, select, toggle } from './tree.js';
-import { create, rename, remove, download, upload, duplicate, targets, moveAsk } from './actions.js';
+import { create, rename, remove, download, upload, duplicate, targets, moveAsk, openStorage } from './actions.js';
 import { register, bindToolbar } from './commands.js';
 import { openHelp } from './menu.js';
+import { openSettings, bindSettings } from './settings.js';
 import { parentOf } from './format.js';
 
 const saveFirst = () => setStatus('Save or discard your changes first.', 'error');
@@ -111,11 +112,22 @@ register({
   id: 'go-up', label: 'Go to parent folder', keys: 'Backspace', scope: 'tree',
   when: () => !!focusedItem() && focusedItem().path !== '', run: () => select(parentOf(focusedItem().path), 'directory'),
 });
+register({
+  id: 'folder-size', label: 'Calculate folder size', tip: 'Add up the size of the selected folder', keys: 'Mod+I', menu: true,
+  when: () => !!state.selected && state.selected.kind === 'directory',
+  run() {
+    const button = editorButton('folder-size');
+    if (button && !button.disabled) button.click();
+  },
+});
+register({ id: 'settings', label: 'Settings', tip: 'Change the settings', keys: 'Mod+,', typing: true, toolbar: true, run: openSettings });
 register({ id: 'help', label: 'Show keyboard shortcuts', keys: '?', run: openHelp });
 register({ id: 'next-tab', label: 'Next tab', keys: 'Mod+Alt+Right', typing: true, when: hasTabs, run: () => stepTab(1) });
 register({ id: 'prev-tab', label: 'Previous tab', keys: 'Mod+Alt+Left', typing: true, when: hasTabs, run: () => stepTab(-1) });
 
 bindToolbar();
+bindSettings();
+document.getElementById('storage-details').addEventListener('click', () => openStorage());
 
 // Esc hides a toolbar tooltip. It shows again for the next button.
 document.addEventListener('keydown', (event) => {

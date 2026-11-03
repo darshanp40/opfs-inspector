@@ -910,6 +910,87 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       await p.context().close();
     });
 
+    it('folder size own and recursive match the fixture', async (t) => {
+      const p = await freshPage([]);
+      await p.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const d = await root.getDirectoryHandle('d', { create: true });
+        const s = await d.getDirectoryHandle('s', { create: true });
+        for (const [dir, name, text] of [[d, 'a', 'abc'], [s, 'b', 'hello']]) {
+          const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+          await w.write(text);
+          await w.close();
+        }
+      });
+      await p.click('#refresh');
+      await p.locator('.row[data-path="d"]').click();
+      const result = () => p.locator('#card-body .size-result').innerText();
+      await p.getByRole('button', { name: 'Calculate size', exact: true }).click();
+      await p.locator('#card-body .size-result').waitFor();
+      assert.match(await result(), /3 B \(3 bytes\)\s+Files\s+1\s+Folders\s+1/);
+      await p.getByRole('button', { name: 'Calculate with subfolders' }).click();
+      await p.waitForFunction(() => /8 bytes/.test(document.querySelector('#card-body .size-result')?.textContent || ''));
+      assert.match(await result(), /8 B \(8 bytes\)\s+Files\s+2\s+Folders\s+1/);
+      // Cancel: a result that arrives later is not drawn.
+      await p.evaluate(() => {
+        const t = window.opfsTransport;
+        const real = t.call;
+        t.call = async (op, args) => {
+          const reply = await real(op, args);
+          if (op === 'dirSize') await new Promise((r) => setTimeout(r, 400));
+          return reply;
+        };
+      });
+      await p.getByRole('button', { name: 'Calculate size', exact: true }).click();
+      await p.getByRole('button', { name: 'Cancel' }).click();
+      await p.waitForTimeout(800);
+      assert.equal(await p.locator('#card-body .size-result').count(), 0);
+      assert.match(await p.locator('#status').textContent(), /Cancelled/);
+      // Mod+I runs it.
+      await p.locator('.row[data-path="d"]').focus();
+      await p.keyboard.press(process.platform === 'darwin' ? 'Meta+i' : 'Control+i');
+      await p.locator('#card-body .size-result').waitFor();
+      await p.context().close();
+    });
+
+    it('settings persist across reload', async () => {
+      const p = await freshPage([]);
+      await p.click('#settings');
+      await p.locator('#settings-dialog[open]').waitFor();
+      assert.equal(await p.evaluate(() => document.activeElement.closest('#settings-dialog') !== null), true);
+      await p.getByLabel('JSON indent').selectOption('4');
+      await p.getByLabel('Sort keys').check();
+      await p.getByLabel('Folder size').selectOption('recursive');
+      await p.getByLabel('Editor font size').fill('16');
+      await p.getByLabel('Editor font size').dispatchEvent('change');
+      await p.keyboard.press('Escape');
+      await p.locator('#settings-dialog[open]').waitFor({ state: 'detached' }).catch(() => {});
+      assert.equal(await p.evaluate(() => document.activeElement.id), 'settings');
+      await p.reload();
+      await p.locator('.row[data-path=""]').waitFor();
+      await p.keyboard.press(process.platform === 'darwin' ? 'Meta+,' : 'Control+,');
+      await p.locator('#settings-dialog[open]').waitFor();
+      assert.equal(await p.getByLabel('JSON indent').inputValue(), '4');
+      assert.equal(await p.getByLabel('Sort keys').isChecked(), true);
+      assert.equal(await p.getByLabel('Folder size').inputValue(), 'recursive');
+      assert.equal(await p.getByLabel('Editor font size').inputValue(), '16');
+      await p.context().close();
+    });
+
+    it('storage details lists each bucket', async (t) => {
+      if (engine.name !== 'chromium') return t.skip('only Chromium has Storage Buckets');
+      const p = await freshPage([]);
+      await p.evaluate(async () => { await navigator.storageBuckets.open('app-db'); });
+      await p.click('#refresh');
+      await p.waitForFunction(() => [...document.querySelectorAll('#area option')].some((o) => o.value === 'bucket:app-db'));
+      await p.click('#storage-details');
+      await p.locator('#storage-dialog[open]').waitFor();
+      await p.locator('#storage-dialog tbody tr', { hasText: 'app-db' }).waitFor();
+      assert.ok(await p.locator('#storage-dialog tbody tr').count() >= 2);
+      assert.match(await p.locator('#storage-dialog tbody tr').first().textContent(), /of/);
+      await p.context().close();
+    });
+
     it('axe finds no serious violations', async () => {
       await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
@@ -946,6 +1027,15 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
         await row('readme.md').press('?');
         await page.locator('#help[open]').waitFor();
         await scan('help');
+        await page.keyboard.press('Escape');
+        await page.click('#settings');
+        await page.locator('#settings-dialog[open]').waitFor();
+        await scan('settings');
+        await page.keyboard.press('Escape');
+        await page.click('#storage-details');
+        await page.locator('#storage-dialog[open]').waitFor();
+        await page.locator('#storage-dialog tbody tr').first().waitFor();
+        await scan('storage details');
         await page.keyboard.press('Escape');
       }
     });

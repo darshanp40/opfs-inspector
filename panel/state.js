@@ -21,6 +21,7 @@ export const state = {
   dirty: false,
   chunk: 512 * 1024,
   detailRun: 0,
+  sizeRun: 0,
   tab: null, // { path, name } of the open card tab
   usageRun: 0,
 };
