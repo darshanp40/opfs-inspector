@@ -31,6 +31,16 @@ export function toBase64(bytes) {
   return btoa(binary);
 }
 
+// Without JSON.rawJSON (Firefox 128 to 134) a number that would be written
+// differently is refused, so formatting never changes data.
+function checkNumbers(text) {
+  for (const [token] of text.matchAll(/"(?:[^"\\]|\\.)*"|-?\d[\d.eE+-]*/g)) {
+    if (token[0] !== '"' && JSON.stringify(Number(token)) !== token) {
+      throw new Error(`Formatting would change the number ${token}, as this browser cannot keep it exact. The text was left as it is.`);
+    }
+  }
+}
+
 // Pretty-prints JSON. Numbers keep their written form where the browser can
 // (JSON.rawJSON), so big integers are not rounded.
 // ponytail: integer-like keys still sort first, as in any JS object.
@@ -57,5 +67,6 @@ export function formatJson(text, { indent = 2, sortKeys = false } = {}) {
     }
     throw new SyntaxError(`Invalid JSON at line ${line}, column ${column}.`);
   }
+  if (typeof JSON.rawJSON !== 'function') checkNumbers(text);
   return JSON.stringify(value, null, indent);
 }

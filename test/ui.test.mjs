@@ -106,6 +106,29 @@ for (const engine of engines.filter((e) => e.name !== 'webkit')) {
       assert.equal(await format('[12345678901234567890,1.0]', { indent: '\t', sortKeys: false }), '[\n\t12345678901234567890,\n\t1.0\n]');
     });
 
+    // Firefox 128 to 134 has no JSON.rawJSON.
+    it('without JSON.rawJSON, formatJson refuses to change a number', async () => {
+      const results = await page.evaluate(async () => {
+        const { formatJson } = await import('/panel/format.js');
+        const raw = JSON.rawJSON;
+        delete JSON.rawJSON;
+        try {
+          return ['[12345678901234567890]', '{"a": 1.0000000000000001}', '{"s": "1.0", "b": 2, "a": [-0.5, 3]}'].map((text) => {
+            try {
+              return formatJson(text, { indent: 2, sortKeys: true });
+            } catch (error) {
+              return `${error.name}: ${error.message}`;
+            }
+          });
+        } finally {
+          JSON.rawJSON = raw;
+        }
+      });
+      assert.match(results[0], /^Error: .*12345678901234567890/);
+      assert.match(results[1], /^Error: .*1\.0000000000000001/);
+      assert.equal(results[2], '{\n  "a": [\n    -0.5,\n    3\n  ],\n  "b": 2,\n  "s": "1.0"\n}');
+    });
+
     it('formatJson throws a SyntaxError with the line and column', async () => {
       assert.match(await format('{\n  "a": 1,\n}', { indent: 2 }), /^SyntaxError: .*line 3, column 1/);
       assert.match(await format('{"a": ', { indent: 2 }), /^SyntaxError: .*line 1, column 7/);
